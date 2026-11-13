@@ -1,7 +1,7 @@
 <?xml version='1.0' standalone='yes'?>
 <!DOCTYPE PLUGIN [
 <!ENTITY name    "script.deck">
-<!ENTITY version "2026.11.13c">
+<!ENTITY version "2026.11.13d">
 <!ENTITY plugdir "/usr/local/emhttp/plugins/script.deck">
 <!ENTITY cfgdir  "/boot/config/plugins/script.deck">
 <!ENTITY pluginURL "https://raw.githubusercontent.com/hernandito/script.deck/main/script.deck.plg">
@@ -10,10 +10,11 @@
 
 <CHANGES>
 ###&version;
-- First public release: tiles for every User Scripts script, grouped and arranged by category, with live status.
-- Run window with live output; closing it stops the script. Details window with overview, run history and logs that survive reboots.
-- Edit titles (colours, bold, line breaks), icons (emoji, containers, plugins, built-in, uploads), colours, schedules and the script itself.
-- Manage, rename and reorder categories (shared with User Scripts Enhanced); arrange tiles within a category.
+- Fixed: scripts that print a lot (e.g. rsync backups) showed no runs; the whole log is now indexed, not just its end.
+- Pinned scripts get "Also show in its category" (on by default); unpinning always puts a script back in its category.
+- Categories sharing a prefix ("Backups - Daily", "Backups - Weekly") show as one heading with indented sub-sections.
+- Scripts with a question (#argumentDescription) ask it in the run window before starting; choices can be offered as [value:Label|value:Label].
+- First public release: tiles, live run window, run history, editing of titles, icons, schedules and scripts, category management.
 </CHANGES>
 
 <!-- Start clean, keep settings (cards.json, icons) on the flash drive. -->
@@ -130,14 +131,14 @@ Markdown="false"
 :is(.sd,.sd-ov) .sd-shbtn:hover .sd-catlabel{color:var(--accent-ink)}
 :is(.sd,.sd-ov) .sd-shbtn:hover .chev{color:var(--accent-ink)}
 .sd-shbtn .chev{display:inline-flex;transition:transform .25s ease;color:#555}
-.sd-sec.shut .sd-shbtn .chev{transform:rotate(-90deg)}
+.sd-sec.shut>.sd-sh .sd-shbtn .chev{transform:rotate(-90deg)}
 .sd-catlabel{font-size:var(--cat-size);font-weight:700;color:var(--ink);letter-spacing:0}
 .sd-sh .note{font-size:12.5px;color:var(--muted)}
 .sd-sh .rule{flex:1;height:1px;background:#d6d6d6}
 .sd-acc{display:grid;grid-template-rows:1fr;transition:grid-template-rows .3s ease,opacity .25s ease,visibility 0s;opacity:1;visibility:visible}
 .sd-acc>div{min-height:0;overflow:hidden}
 /* Collapsed content is really hidden (no clicks, no Tab focus) once the closing animation ends. */
-.sd-sec.shut .sd-acc{grid-template-rows:0fr;opacity:0;visibility:hidden;transition:grid-template-rows .3s ease,opacity .25s ease,visibility 0s .3s}
+.sd-sec.shut>.sd-acc{grid-template-rows:0fr;opacity:0;visibility:hidden;transition:grid-template-rows .3s ease,opacity .25s ease,visibility 0s .3s}
 .sd-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(172px,1fr));gap:10px;padding:2px 2px 4px;margin-left:40px}
 .sd-empty{color:var(--muted);padding:20px 0}
 
@@ -395,6 +396,21 @@ div.title:first-of-type{margin-bottom:8px;display:none}
 :is(.sd,.sd-ov) .sd-shbtn{display:inline-flex;align-items:center;gap:2px;padding:3px 6px 3px 2px!important;border-radius:7px;cursor:pointer;color:var(--ink)!important}
 .sd-shbtn .sd-badge,.sd-catrow .sd-badge{margin-top:0;margin-left:6px}
 
+/* ---------- a script's question before it runs (#argumentDescription) ---------- */
+.sd-ask{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin:0 24px 2px;padding:10px 14px;border:1px solid #e0c46c;background:#fff8e1;border-radius:10px}
+.sd-ask .q{font-weight:600;color:var(--ink);margin-right:6px}
+.sd-ask.off{opacity:.65}
+:is(.sd,.sd-ov) .sd-ask .sd-btn.on{background:#ffe271!important;border-color:#595959!important;color:#000!important}
+.sd-ask .sd-input{min-width:220px}
+.sd-chk.off{opacity:.5}
+
+/* ---------- grouped categories ("Backups - Daily", "Backups - Weekly"...) as an outline ---------- */
+.sd-sec.grp>.sd-acc>div{padding-top:4px}
+.sd-sec.sub{margin-left:30px;margin-bottom:4px}
+.sd-sec.sub .sd-catlabel{font-size:16px;font-weight:600;color:var(--ink2)}
+.sd-sec.sub .sd-sh .rule{background:#e2e2e2}
+.sd-sec.sub .sd-grid{margin-left:30px}
+
 @media (prefers-reduced-motion:reduce){.sd-acc,.sd-ov,.sd-modal,.sd-shbtn .chev{transition:none!important}}
 @media (max-width:700px){
   .sd{padding:12px}
@@ -577,8 +593,8 @@ div.title:first-of-type{margin-bottom:8px;display:none}
     var chips = $('#sd-chips', app), ch = chipsHtml();
     if (chips && chips.innerHTML !== ch && !selectionIn(chips)) chips.innerHTML = ch;
     var v = buildView();
-    v.secs.forEach(function (sec) {
-      var n = app.querySelector('.sd-sec[data-seckey="' + cssq(sec.key) + '"] .note');
+    flatSecs(v.secs).forEach(function (sec) {
+      var n = app.querySelector('.sd-sec[data-seckey="' + cssq(sec.key) + '"] > .sd-sh .note');
       var t = noteText(sec);
       if (n && n.textContent !== t && !selectionIn(n)) n.textContent = t;
     });
@@ -687,28 +703,46 @@ div.title:first-of-type{margin-bottom:8px;display:none}
         return x - y;
       });
     };
-    var pinned = byOrder(list.filter(function (s) { return s.pinned; }), (S.order || {}).pinned);   // pinned scripts also stay in their category
+    var pinned = byOrder(list.filter(function (s) { return s.pinned; }), (S.order || {}).pinned);
+    // Pinned scripts also stay in their category, unless told not to ("Also show in its category" off).
+    var list2 = list.filter(inCategory);
     var inCat = function (id) {
       var c0 = cats.filter(function (c) { return c.id === id; })[0];
-      return byOrder(list.filter(function (s) { return s.category === id || cats.some(function (c) { return c.id === s.category && c.parent === id; }); }), c0 && c0.ids);
+      return byOrder(list2.filter(function (s) { return s.category === id || cats.some(function (c) { return c.id === s.category && c.parent === id; }); }), c0 && c0.ids);
     };
-    var other = byOrder(list.filter(function (s) { return !s.category || !cats.some(function (c) { return c.id === s.category; }); }), (S.order || {}).other);
+    var other = byOrder(list2.filter(function (s) { return !s.category || !cats.some(function (c) { return c.id === s.category; }); }), (S.order || {}).other);
     var G = groups();
-    var secOf = function (g, inTab) { return g.cats.map(function (x) { return { key: 'c' + x.cat.id, name: inTab ? x.short : x.cat.name, items: inCat(x.cat.id) }; }); };
+    // A group of categories sharing a prefix is one heading with its categories indented under it.
+    var secOf = function (g) {
+      var subs = g.cats.map(function (x) { return { key: 'c' + x.cat.id, name: g.cats.length > 1 ? x.short : x.cat.name, items: inCat(x.cat.id) }; });
+      if (g.cats.length < 2) return subs;
+      if (S.tab === 'all') subs = subs.filter(function (x) { return x.items.length; });
+      if (!subs.length) return [];
+      var all = [];
+      subs.forEach(function (x) { all = all.concat(x.items); });
+      return [{ key: g.id, name: g.name, group: true, subs: subs, items: all }];
+    };
     var PIN = { key: 'pinned', name: '📌 Pinned', items: pinned };
     var OTHER = { key: 'other', name: otherName(), note: 'scripts without a category', items: other };
     if (S.tab === 'pinned') return [PIN];
     if (S.tab === 'other') return [OTHER];
     if (S.tab !== 'all') {
       var g = G.filter(function (x) { return x.id === S.tab; })[0];
-      if (g) return secOf(g, g.cats.length > 1);
+      if (g) return secOf(g);
       S.tab = 'all';
     }
     if (pinned.length) out.push(PIN);
     ordered().forEach(function (e) {
       if (e.other) { if (other.length) out.push(OTHER); }
-      else out = out.concat(secOf(e.g, false).filter(function (x) { return x.items.length; }));
+      else out = out.concat(secOf(e.g).filter(function (x) { return x.items.length; }));
     });
+    return out;
+  }
+  function inCategory(s) { return !(s.pinned && s.pinHide); }
+  /* Every section, group headings and their sub-sections alike, in page order. */
+  function flatSecs(secs) {
+    var out = [];
+    (secs || sections()).forEach(function (x) { out.push(x); if (x.subs) out = out.concat(x.subs); });
     return out;
   }
 
@@ -716,11 +750,11 @@ div.title:first-of-type{margin-bottom:8px;display:none}
   function buildView() {
     var tabs = [{ id: 'all', name: 'All', n: S.data.scripts.length }];
     if (S.data.scripts.some(function (s) { return s.pinned; })) tabs.push({ id: 'pinned', name: '📌 Pinned', n: S.data.scripts.filter(function (s) { return s.pinned; }).length });
-    var otherN = S.data.scripts.filter(function (s) { return !s.category; }).length;
+    var otherN = S.data.scripts.filter(function (s) { return !s.category && inCategory(s); }).length;
     ordered().forEach(function (e) {
       if (e.other) { if (otherN) tabs.push({ id: 'other', name: otherName(), n: otherN }); return; }
       var ids = e.g.cats.map(function (x) { return x.cat.id; });
-      tabs.push({ id: e.g.id, name: e.g.name, n: S.data.scripts.filter(function (s) { return ids.indexOf(s.category) >= 0; }).length });
+      tabs.push({ id: e.g.id, name: e.g.name, n: S.data.scripts.filter(function (s) { return ids.indexOf(s.category) >= 0 && inCategory(s); }).length });
     });
     if (!tabs.some(function (t) { return t.id === S.tab; })) S.tab = 'all';
     return { tabs: tabs, secs: sections() };
@@ -728,7 +762,7 @@ div.title:first-of-type{margin-bottom:8px;display:none}
   /* Changes only when the layout changes - not when a script runs or a clock ticks. */
   function layoutSig() {
     var v = buildView();
-    return JSON.stringify([S.tab, S.q, S.other, v.tabs, v.secs.map(function (s) { return [s.key, s.name, s.items.map(function (i) { return i.id; })]; })]);
+    return JSON.stringify([S.tab, S.q, S.other, v.tabs, flatSecs(v.secs).map(function (s) { return [s.key, s.name, !!s.group, s.items.map(function (i) { return i.id; })]; })]);
   }
   function chipsHtml() {
     var c = counts();
@@ -754,26 +788,32 @@ div.title:first-of-type{margin-bottom:8px;display:none}
         '<span class="nm">' + esc(t.name) + '</span><span class="sd-badge">' + t.n + '</span></button>';
     });
     h += '<button type="button" class="sd-cat sq" data-managecats aria-label="Manage categories" title="Manage categories: add, rename, delete, reorder"><i class="fa fa-cog" aria-hidden="true"></i></button>';
-    var anyOpen = secs.some(function (x) { return !S.shut[x.key]; });
+    var anyOpen = flatSecs(secs).some(function (x) { return !S.shut[x.key]; });
     h += '<span class="grow"></span><button type="button" class="sd-linkbtn" data-allsec="' + (anyOpen ? 'shut' : 'open') + '">' + (anyOpen ? 'Collapse all' : 'Expand all') + '</button></nav>';
 
     if (!secs.length || secs.every(function (x) { return !x.items.length; })) h += '<div class="sd-empty">' + (S.q ? 'No script matches “' + esc(S.q) + '”.' : 'Nothing here yet.') + '</div>';
     cardCache = {};
-    secs.forEach(function (sec) {
+    var secHtml = function (sec, sub) {
       var arranging = S.reorder === sec.key;
       var shut = !!S.shut[sec.key] && !S.q && !arranging;
-      var tools = arranging
+      var tools = sec.group ? '' : arranging
         ? '<span class="sd-arrbar"><span class="sd-help">Drag the tiles, or use ◀ ▶</span>' +
           '<button type="button" class="sd-btn sm" data-arrcancel>Cancel</button><button type="button" class="sd-btn sm accent" data-arrdone="' + esc(sec.key) + '">Done</button></span>'
         : (sec.items.length > 1 && !S.q && !S.reorder ? '<button type="button" class="sd-arrbtn" data-arrange="' + esc(sec.key) + '" aria-label="Arrange the tiles of ' + esc(sec.name) + '" title="Arrange tiles">' + svg(I.arrange, 15) + '</button>' : '');
-      h += '<section class="sd-sec' + (shut ? ' shut' : '') + (arranging ? ' arranging' : '') + '" data-seckey="' + esc(sec.key) + '"><div class="sd-sh">' +
+      var o = '<section class="sd-sec' + (sec.group ? ' grp' : '') + (sub ? ' sub' : '') + (shut ? ' shut' : '') + (arranging ? ' arranging' : '') + '" data-seckey="' + esc(sec.key) + '"><div class="sd-sh">' +
         '<button type="button" class="sd-shbtn" data-sec="' + esc(sec.key) + '" aria-expanded="' + (!shut) + '"' + (arranging ? ' disabled' : '') + '><span class="chev">' + svg(I.chev, 14) + '</span>' +
         '<span class="sd-catlabel">' + esc(sec.name) + '</span><span class="sd-badge">' + sec.items.length + '</span></button>' +
         '<span class="note">' + esc(noteText(sec)) + '</span><span class="rule"></span>' + tools + '</div>' +
-        '<div class="sd-acc"><div><div class="sd-grid">';
-      sec.items.forEach(function (s) { var c = cardHtml(s, false, arranging); if (!arranging) cardCache[s.id] = c; h += c; });
-      h += '</div></div></div></section>';
-    });
+        '<div class="sd-acc"><div>';
+      if (sec.group) sec.subs.forEach(function (x) { o += secHtml(x, true); });
+      else {
+        o += '<div class="sd-grid">';
+        sec.items.forEach(function (s) { var c = cardHtml(s, false, arranging); if (!arranging) cardCache[s.id] = c; o += c; });
+        o += '</div>';
+      }
+      return o + '</div></div></section>';
+    };
+    secs.forEach(function (sec) { h += secHtml(sec, false); });
     app.innerHTML = h;
     lastLayout = layoutSig();
     if (active) { var q = $('#sd-q'); q.focus(); q.setSelectionRange(q.value.length, q.value.length); }
@@ -810,7 +850,7 @@ div.title:first-of-type{margin-bottom:8px;display:none}
     S.shut[key] = shut;
     if (!shut) delete S.shut[key];
     var sec = app.querySelector('.sd-sec[data-seckey="' + cssq(key) + '"]');
-    if (sec) { sec.classList.toggle('shut', !!shut); var b = $('.sd-shbtn', sec); if (b) b.setAttribute('aria-expanded', String(!shut)); }
+    if (sec) { sec.classList.toggle('shut', !!shut); var b = sec.querySelector(':scope > .sd-sh .sd-shbtn'); if (b) b.setAttribute('aria-expanded', String(!shut)); }
     var anyOpen = Array.prototype.some.call(app.querySelectorAll('.sd-sec'), function (x) { return !x.classList.contains('shut'); });
     var lb = $('[data-allsec]', app);
     if (lb) { lb.dataset.allsec = anyOpen ? 'shut' : 'open'; lb.textContent = anyOpen ? 'Collapse all' : 'Expand all'; }
@@ -863,6 +903,8 @@ div.title:first-of-type{margin-bottom:8px;display:none}
     if (!s) return;
     if (s.askFirst && !confirm('Run “' + s.plain + '”?')) return;
     if (s.vars && (s.vars.foregroundOnly || s.vars.directPHP)) return runClassic(s);
+    // A script that asks a question first: the run window opens and asks.
+    if (askOf(s)) return openRun(id);
     // "Run" opens the run window: live output, and closing it stops the script
     // (like Unraid's own script window). "Run in background" just starts it.
     if (watch) { openRun(id); return startRun('live'); }
@@ -872,10 +914,26 @@ div.title:first-of-type{margin-bottom:8px;display:none}
     }).catch(function (e) { toast(e.message, true); });
   }
 
+  /* A question the script asks before it runs (User Scripts' #argumentDescription=...).
+     Choices can be offered at the end: "What to do? [report:📋 Report only|clean:🧹 Clean up]".
+     The answer becomes the script's $1 (and $2 ... if it has spaces). */
+  function askOf(s) {
+    var d = s && s.vars && s.vars.argumentDescription;
+    if (!d) return null;
+    var m = d.match(/\[([^\]]*\|[^\]]*)\]\s*$/);
+    var choices = m ? m[1].split('|').map(function (c) {
+      var i = c.indexOf(':'), v = (i > 0 ? c.slice(0, i) : c).trim();
+      return { v: v, label: (i > 0 ? c.slice(i + 1) : c).trim() || v };
+    }).filter(function (c) { return c.v; }) : null;
+    return { q: (m ? d.slice(0, m.index) : d).trim(), choices: choices, def: s.vars.argumentDefault || '' };
+  }
+
   /* ---------- the run window ---------- */
   function openRun(id) {
     ensureOverlay();
-    S.modal = { kind: 'run', id: id, mode: null, startAt: null, follow: true, find: '', fmt: null, log: null };
+    var ask = askOf(byId(id));
+    S.modal = { kind: 'run', id: id, mode: null, startAt: null, follow: true, find: '', fmt: null, log: null,
+      ask: ask ? { value: ask.def || (ask.choices ? ask.choices[0].v : '') } : null };
     renderModal();
     showOverlay();
     loadLog();
@@ -889,7 +947,9 @@ div.title:first-of-type{margin-bottom:8px;display:none}
     m.startAt = Math.floor(Date.now() / 1000) - 2;            // until a run this new appears, show "Starting…"
     m.follow = true;
     renderModal();
-    post({ a: 'run', id: m.id }).then(function () {
+    var p = { a: 'run', id: m.id };
+    if (m.ask) { p.args = m.ask.value; m.asked = m.ask.value; }
+    post(p).then(function () {
       setTimeout(function () { refresh(); loadLog(); }, 500);
     }).catch(function (e) { m.startAt = null; m.mode = null; renderModal(); toast(e.message, true); });
   }
@@ -912,6 +972,17 @@ div.title:first-of-type{margin-bottom:8px;display:none}
       '<button type="button" class="sd-btn" data-rbg' + (busy ? ' disabled' : '') + '>Run in background</button>' +
       '<button type="button" class="sd-btn" data-rdetails' + (detailsOk ? '' : ' disabled title="Available when the script finishes (closing this window would stop it)"') + '>Details</button>' +
       (st.phase === 'done' ? '<button type="button" class="sd-btn accent push" data-rdone>Done</button>' : '') + '</div>';
+    var ask = m.ask && askOf(s);
+    if (ask) {
+      h += '<div class="sd-ask' + (busy ? ' off' : '') + '"><span class="q">❓ ' + esc(ask.q || 'Argument for this run') + '</span>';
+      if (ask.choices) ask.choices.forEach(function (c) {
+        var on = m.ask.value === c.v;
+        h += '<button type="button" class="sd-btn sm' + (on ? ' on' : '') + '" data-ans="' + esc(c.v) + '" aria-pressed="' + on + '"' + (busy ? ' disabled' : '') + '>' + esc(c.label) + '</button>';
+      });
+      else h += '<input class="sd-input" id="sd-arg" value="' + esc(m.ask.value) + '" aria-label="' + esc(ask.q || 'Argument') + '"' + (busy ? ' disabled' : '') + '>';
+      h += busy && m.asked != null ? '<span class="sd-help">running with: <b>' + esc(m.asked || '(nothing)') + '</b></span>' : '<span class="sd-help">then press Run</span>';
+      h += '</div>';
+    }
     var status, cls = '';
     if (st.phase === 'starting') { status = 'Starting…'; cls = 'run'; }
     else if (st.phase === 'running') { status = '● Running <span class="el">' + (st.run && st.run.start ? elapsed(st.run.start) : '') + '</span>' + (m.mode === 'live' ? ' · closing this window stops it' : m.mode === 'bg' ? ' · in the background' : ''); cls = 'run'; }
@@ -1150,7 +1221,9 @@ div.title:first-of-type{margin-bottom:8px;display:none}
     var m = S.modal, box = ov.firstChild;
     var ob0 = $('.sd-rout', box), keep = soft && ob0 ? ob0.scrollTop : null;
     var atBottom = !ob0 || ob0.scrollTop + ob0.clientHeight >= ob0.scrollHeight - 8;
+    var typing = document.activeElement && document.activeElement.id === 'sd-arg' ? [document.activeElement.selectionStart, document.activeElement.selectionEnd] : null;
     box.innerHTML = runHtml(s);
+    if (typing) { var ai = $('#sd-arg', box); if (ai) { ai.focus(); ai.setSelectionRange(typing[0], typing[1]); } }
     var ob = $('.sd-rout', box), st = runState(m, s);
     if (st.phase === 'starting') { ob.className = 'sd-out sd-rout plain'; ob.textContent = 'Starting… the output appears here as soon as the script prints something.'; }
     else if (st.run) fillOutput(ob, st.run.text, m.fmt || S.fmtPref || (isHtml(st.run.text) ? 'html' : 'plain'), '');
@@ -1262,7 +1335,7 @@ div.title:first-of-type{margin-bottom:8px;display:none}
     S.modal.etab = 'card';
     S.modal.dirty = false;
     var custom = s.schedule.custom || '';
-    S.modal.draft = { title: s.title, desc: s.desc, icon: c, tint: s.tint || '', bg: s.bg || '', pinned: s.pinned, askFirst: s.askFirst,
+    S.modal.draft = { title: s.title, desc: s.desc, icon: c, tint: s.tint || '', bg: s.bg || '', pinned: s.pinned, pinShow: !s.pinHide, askFirst: s.askFirst,
       category: s.category || '', src: 'suggested', emojiOpen: false, script: null,
       freq: s.schedule.freq || 'disabled', cron: custom || '0 3 * * *', builder: parseCron(custom || '0 3 * * *') };
     renderModal();
@@ -1360,8 +1433,9 @@ div.title:first-of-type{margin-bottom:8px;display:none}
     h += '<div class="sd-inline"><label class="sd-inline" style="gap:10px"><span class="sd-k">Category</span><select class="sd-select" id="sd-cat"><option value="">' + esc(otherName()) + ' (no category)</option>' +
       cats.map(function (c) { return '<option value="' + esc(c.id) + '"' + (c.id === d.category ? ' selected' : '') + '>' + esc(c.name) + '</option>'; }).join('') + '</select></label>' +
       '<label class="sd-chk"><input type="checkbox" id="sd-pinned"' + (d.pinned ? ' checked' : '') + '> 📌 Pin to top</label>' +
+      '<label class="sd-chk' + (d.pinned ? '' : ' off') + '" title="Only applies while the script is pinned"><input type="checkbox" id="sd-pinshow"' + (d.pinShow ? ' checked' : '') + (d.pinned ? '' : ' disabled') + '> Also show in its category</label>' +
       '<label class="sd-chk"><input type="checkbox" id="sd-ask"' + (d.askFirst ? ' checked' : '') + '> Ask before running</label></div>' +
-      '<p class="sd-help" style="margin-top:10px">Pinned scripts also stay in their category.' + (S.data.catsShared ? ' Categories are shared with User Scripts Enhanced.' : '') + '</p>';
+      '<p class="sd-help" style="margin-top:10px">A pinned script is shown in Pinned and, unless you untick “Also show in its category”, in its category too. Unpinned, it is always back in its category.' + (S.data.catsShared ? ' Categories are shared with User Scripts Enhanced.' : '') + '</p>';
     return h;
   }
   function suggest(s, icons) {
@@ -1484,7 +1558,7 @@ div.title:first-of-type{margin-bottom:8px;display:none}
     if (btn) { btn.disabled = true; btn.textContent = 'Saving…'; }
     var unlock = function () { var b = $('[data-save]', ov); if (b) { b.disabled = false; b.textContent = 'Save'; } };
     if (rich) d.title = rich.innerHTML;
-    var p = { a: 'save', id: s.id, title: d.title, desc: d.desc, icon: JSON.stringify(d.icon || {}), tint: d.tint, bg: d.bg, pinned: d.pinned ? '1' : '0', askFirst: d.askFirst ? '1' : '0' };
+    var p = { a: 'save', id: s.id, title: d.title, desc: d.desc, icon: JSON.stringify(d.icon || {}), tint: d.tint, bg: d.bg, pinned: d.pinned ? '1' : '0', pinHide: d.pinned && !d.pinShow ? '1' : '0', askFirst: d.askFirst ? '1' : '0' };
     if (d.category !== (s.category || '')) p.category = d.category;
     var jobs = [post(p)];
     if (d.freq !== s.schedule.freq || (d.freq === 'custom' && d.cron.trim() !== (s.schedule.custom || '').trim())) {
@@ -1577,7 +1651,7 @@ div.title:first-of-type{margin-bottom:8px;display:none}
     var ds = t.dataset;
     if (ds.tab) { S.tab = ds.tab; save('tab', S.tab); renderPage(); return; }
     if (ds.sec) { var sh = !S.shut[ds.sec]; toggleSection(ds.sec, sh); return; }
-    if (ds.allsec) { var shut = ds.allsec === 'shut'; sections().forEach(function (x) { toggleSection(x.key, shut); }); return; }
+    if (ds.allsec) { var shut = ds.allsec === 'shut'; flatSecs().forEach(function (x) { toggleSection(x.key, shut); }); return; }
     if (ds.managecats !== undefined) return openCats();
     if (ds.arrange) { S.reorder = ds.arrange; renderPage(); return; }
     if (ds.arrcancel !== undefined) { S.reorder = null; renderPage(); return; }
@@ -1596,6 +1670,7 @@ div.title:first-of-type{margin-bottom:8px;display:none}
     if (ds.close !== undefined) return closeModal();
     if (m.kind === 'run') {
       if (ds.rclose !== undefined) return closeRun();
+      if (ds.ans !== undefined) { m.ask.value = ds.ans; return renderModal(true); }
       if (ds.rrun !== undefined) return startRun('live');
       if (ds.rbg !== undefined) return startRun('bg');
       if (ds.rdone !== undefined) return closeModal();
@@ -1674,12 +1749,14 @@ div.title:first-of-type{margin-bottom:8px;display:none}
   }
   function onKey(e) {
     if (e.target.id === 'sd-emoji-in' && e.key === 'Enter') { e.preventDefault(); useOwnEmoji(); return; }
+    if (e.target.id === 'sd-arg' && e.key === 'Enter') { e.preventDefault(); startRun('live'); return; }
     if (e.target.id === 'sd-rich' && e.key === 'Enter') { e.preventDefault(); document.execCommand('insertLineBreak'); changed(); }
   }
   function onInput(e) {
     var t = e.target, m = S.modal;
     if (t.id === 'sd-q') { S.q = t.value; renderPage(); return; }
     if (!m) return;
+    if (t.id === 'sd-arg' && m.ask) { m.ask.value = t.value; return; }
     if (t.dataset && t.dataset.cname !== undefined) { m.list[+t.dataset.cname].name = t.value; m.dirty = true; return; }
     if (t.id === 'sd-find') { m.find = t.value; renderModal(true); return; }
     if (t.id === 'sd-rich') return changed();
@@ -1704,7 +1781,13 @@ div.title:first-of-type{margin-bottom:8px;display:none}
     }
     if (!m) return;
     if (t.id === 'sd-follow') { m.follow = t.checked; if (m.follow && m.log) m.run = m.log.runs.length - 1; renderModal(true); return; }
-    if (t.id === 'sd-pinned') { m.draft.pinned = t.checked; m.dirty = true; return updatePreview(); }
+    if (t.id === 'sd-pinned') {
+      m.draft.pinned = t.checked; m.dirty = true;
+      var ps = $('#sd-pinshow', ov);
+      if (ps) { ps.disabled = !t.checked; ps.parentNode.classList.toggle('off', !t.checked); }
+      return updatePreview();
+    }
+    if (t.id === 'sd-pinshow') { m.draft.pinShow = t.checked; m.dirty = true; return; }
     if (t.id === 'sd-ask') { m.draft.askFirst = t.checked; m.dirty = true; return updatePreview(); }
     if (t.id === 'sd-cat') { m.draft.category = t.value; m.dirty = true; return; }
     if (t.id === 'sd-bmode') {
@@ -2239,6 +2322,18 @@ switch ($a) {
     @mkdir(SD_TMP . '/finished', 0755, true);
     $body = str_replace("\r", '', (string)file_get_contents($path));
     if (strpos($body, '#!') !== 0) $body = "#!/bin/bash\n" . $body;
+    // A script that asks a question (#argumentDescription=...) gets the answer as $1 $2 ...
+    // User Scripts appends #argumentDefault to the command line; "set --" replaces that for this run.
+    if (isset($_POST['args']) && $vars['argumentDescription'] !== '' && !$vars['directPHP'] && preg_match('#^\#!\S*(bash|sh)\b#', $body)) {
+      $words = preg_split('/\s+/', trim(mb_substr((string)$_POST['args'], 0, 500)), -1, PREG_SPLIT_NO_EMPTY);
+      $set = 'set -- ' . implode(' ', array_map('escapeshellarg', $words)) . "   # answer given in Script Deck\n";
+      // after the header comments, so User Scripts still reads its #variables
+      $lines = explode("\n", $body);
+      $at = count($lines);
+      foreach ($lines as $i => $l) if ($i > 0 && trim($l) !== '' && $l[0] !== '#') { $at = $i; break; }
+      array_splice($lines, $at, 0, [rtrim($set)]);
+      $body = implode("\n", $lines);
+    }
     file_put_contents($tmp, $body);
     chmod($tmp, 0755);
     // Same launcher the original "Run In Background" button uses.
@@ -2288,6 +2383,8 @@ switch ($a) {
     if (isset($_POST['tint'])) $card['tint'] = preg_match('/^([a-z]{0,12}|#[0-9a-f]{6})$/i', $_POST['tint']) ? strtolower($_POST['tint']) : '';
     if (isset($_POST['bg'])) $card['bg'] = sd_hex($_POST['bg']);
     if (isset($_POST['pinned'])) $card['pinned'] = $_POST['pinned'] === '1';
+    if (isset($_POST['pinHide'])) $card['pinHide'] = $_POST['pinHide'] === '1';
+    if (empty($card['pinned'])) unset($card['pinHide']);   // unpinned: back in its category
     if (isset($_POST['askFirst'])) $card['askFirst'] = $_POST['askFirst'] === '1';
     $cards[$id] = array_filter($card, function ($v) { return $v !== '' && $v !== false && $v !== null; });
     if (!$cards[$id]) unset($cards[$id]);
@@ -2327,7 +2424,7 @@ switch ($a) {
     $id = need_id();
     $cards = sd_json_read(SD_CARDS, []);
     $cards[$id]['pinned'] = ($_POST['pinned'] ?? '') === '1';
-    if (!$cards[$id]['pinned']) unset($cards[$id]['pinned']);
+    if (!$cards[$id]['pinned']) unset($cards[$id]['pinned'], $cards[$id]['pinHide']);   // unpinned: back in its category
     if (!$cards[$id]) unset($cards[$id]);
     sd_json_write(SD_CARDS, $cards);
     out(['ok' => true]);
@@ -2626,39 +2723,68 @@ function sd_parse_time($s) {
   return $d ? $d->getTimestamp() : null;
 }
 
-/** Split a User Scripts log into runs: [start, end, aborted, from, to] (line offsets). */
-function sd_parse_runs($text) {
-  $runs = [];
-  $lines = explode("\n", $text);
-  foreach ($lines as $i => $line) {
-    if (preg_match('/Script Starting (\w{3} \d{1,2}, \d{4}\s+\d{1,2}:\d{2}\.\d{2})/', $line, $m)) {
-      if ($runs) $runs[count($runs) - 1]['to'] = $i - 1;
-      $runs[] = ['start' => sd_parse_time($m[1]), 'end' => null, 'aborted' => false, 'from' => $i, 'to' => count($lines) - 1];
-    } elseif ($runs && preg_match('/Script Finished (\w{3} \d{1,2}, \d{4}\s+\d{1,2}:\d{2}\.\d{2})/', $line, $m)) {
-      $runs[count($runs) - 1]['end'] = sd_parse_time($m[1]);
-    } elseif ($runs && strpos($line, 'Execution was aborted by user') !== false) {
-      $runs[count($runs) - 1]['aborted'] = true;
-    }
-  }
-  return $runs;
-}
-
-function sd_run_text($lines, $r) {
-  $t = implode("\n", array_slice($lines, $r['from'], $r['to'] - $r['from'] + 1));
-  if (strlen($t) > SD_RUN_MAX) $t = "… (earlier output trimmed)\n" . substr($t, -SD_RUN_MAX);
-  return $t;
-}
-
-/** Last ~2 MB of a log is plenty and keeps huge logs from stalling the page. */
-function sd_read_log($id, $max = 2097152) {
+/** Runs in a User Scripts log: [start, end, aborted, from, to] (byte offsets; to = null means
+ *  "until end of file"). The whole file is scanned - a run that prints 100,000 lines must
+ *  still be found - but only once: the result is cached in /tmp and later calls only read
+ *  what was appended since. */
+function sd_log_runs($id) {
   $f = sd_log_file($id);
-  if (!is_file($f)) return '';
+  clearstatcache(true, $f);
+  if (!is_file($f)) return [];
   $size = filesize($f);
-  $h = fopen($f, 'r');
-  if ($size > $max) { fseek($h, -$max, SEEK_END); fgets($h); }
-  $t = stream_get_contents($h);
+  $cdir = '/tmp/script.deck.idx';
+  $cfile = $cdir . '/' . rawurlencode($id) . '.json';
+  $c = sd_json_read($cfile, []);
+  // a deleted-and-recreated log gets a fresh scan (inode plus its first bytes identify it)
+  $ino = @fileinode($f) . ':' . md5((string)@file_get_contents($f, false, null, 0, 256));
+  if (!isset($c['pos'], $c['runs'], $c['ino']) || $c['ino'] !== $ino || $c['pos'] > $size) $c = ['ino' => $ino, 'pos' => 0, 'runs' => []];
+  if ($c['pos'] < $size) {
+    $h = fopen($f, 'r');
+    fseek($h, $c['pos']);
+    $runs = $c['runs'];
+    while (true) {
+      $at = ftell($h);
+      $line = fgets($h);
+      if ($line === false) break;
+      if (substr($line, -1) !== "\n") break;              // half-written line: read it next time
+      $c['pos'] = $at + strlen($line);
+      if (strpos($line, 'Script ') === false && strpos($line, 'Execution was aborted') === false) continue;
+      if (preg_match('/Script Starting (\w{3} \d{1,2}, \d{4}\s+\d{1,2}:\d{2}\.\d{2})/', $line, $m)) {
+        if ($runs) $runs[count($runs) - 1]['to'] = $at;
+        $runs[] = ['start' => sd_parse_time($m[1]), 'end' => null, 'aborted' => false, 'from' => $at, 'to' => null];
+      } elseif ($runs && preg_match('/Script Finished (\w{3} \d{1,2}, \d{4}\s+\d{1,2}:\d{2}\.\d{2})/', $line, $m)) {
+        $runs[count($runs) - 1]['end'] = sd_parse_time($m[1]);
+      } elseif ($runs && strpos($line, 'Execution was aborted by user') !== false) {
+        $runs[count($runs) - 1]['aborted'] = true;
+      }
+    }
+    fclose($h);
+    $c['runs'] = array_slice($runs, -(SD_KEEP_RUNS + 5));
+    @mkdir($cdir, 0755, true);
+    sd_json_write($cfile, $c, 0);
+  }
+  return $c['runs'];
+}
+
+/** One run's output; very long runs keep only their last SD_RUN_MAX bytes. */
+function sd_run_text($id, $r) {
+  $h = @fopen(sd_log_file($id), 'r');
+  if (!$h) return '';
+  $to = $r['to'] ?? (fstat($h)['size']);
+  $from = $r['from'];
+  $cut = $to - $from > SD_RUN_MAX;
+  if ($cut) { fseek($h, $to - SD_RUN_MAX); fgets($h); } else fseek($h, $from);
+  $len = $to - ftell($h);
+  $t = $len > 0 ? (string)fread($h, $len) : '';
   fclose($h);
-  return str_replace("\r", '', $t);
+  $t = rtrim(str_replace("\r", '', $t), "\n");
+  if ($cut) {
+    // keep the "Script Starting" line so the run still reads as a run
+    $h = fopen(sd_log_file($id), 'r'); fseek($h, $from);
+    $first = rtrim((string)fgets($h), "\r\n"); fclose($h);
+    $t = $first . "\n… (earlier output trimmed - the full log is in /tmp/user.scripts)\n" . $t;
+  }
+  return $t;
 }
 
 /* ---------- run history (survives reboots) ---------- */
@@ -2683,9 +2809,7 @@ function sd_archive_all() {
 }
 
 function sd_archive($id) {
-  $text = sd_read_log($id);
-  if ($text === '') return 0;
-  $runs = sd_parse_runs($text);
+  $runs = sd_log_runs($id);
   if (!$runs) return 0;
   if (sd_running_pid($id)) array_pop($runs);           // still writing
   $runs = array_slice($runs, -SD_KEEP_RUNS);           // only the newest are kept anyway
@@ -2693,13 +2817,12 @@ function sd_archive($id) {
   $index = sd_json_read("$dir/runs.json", []);
   $have = [];
   foreach ($index as $r) $have[$r['start']] = true;
-  $lines = explode("\n", $text);
   $added = 0;
   foreach ($runs as $r) {
     if (!$r['start'] || isset($have[$r['start']])) continue;
     if (!$r['end'] && !$r['aborted']) continue;          // unfinished (e.g. cut by a reboot)
     @mkdir($dir, 0755, true);
-    file_put_contents("$dir/{$r['start']}.log", sd_run_text($lines, $r));
+    file_put_contents("$dir/{$r['start']}.log", sd_run_text($id, $r));
     $index[] = ['start' => $r['start'], 'end' => $r['end'], 'aborted' => $r['aborted']];
     $added++;
   }
@@ -2720,21 +2843,22 @@ function sd_archive_throttled() {
 
 /** Live runs from /tmp plus saved runs from history, oldest first, each with its text. */
 function sd_all_runs($id, $limit = SD_KEEP_RUNS) {
-  $text = sd_read_log($id);
-  $lines = explode("\n", $text);
-  $live = sd_parse_runs($text);
+  $live = sd_log_runs($id);
   $running = sd_running_pid($id) > 0;
   $out = [];
   foreach (sd_hist_index($id) as $r) $out[$r['start']] = $r + ['saved' => true];
   foreach ($live as $i => $r) {
     $out[$r['start'] ?: -$i] = ['start' => $r['start'], 'end' => $r['end'], 'aborted' => $r['aborted'], 'saved' => false,
-      'live' => $running && $i === count($live) - 1, 'text' => sd_run_text($lines, $r)];
+      'live' => $running && $i === count($live) - 1, 'text' => null, 'r' => $r];
   }
   ksort($out);
   $out = array_slice(array_values($out), -$limit);
   foreach ($out as &$r) {
-    if (!isset($r['text'])) $r['text'] = (string)@file_get_contents(sd_hist_dir($id) . "/{$r['start']}.log");
+    // only the runs actually returned get their text read
+    if (isset($r['r'])) { $r['text'] = sd_run_text($id, $r['r']); unset($r['r']); }
+    elseif (!isset($r['text'])) $r['text'] = (string)@file_get_contents(sd_hist_dir($id) . "/{$r['start']}.log");
   }
+  unset($r);
   return $out;
 }
 
@@ -3048,7 +3172,7 @@ function sd_list() {
     if ($icon['t'] === 'emoji' && ($icon['auto'] ?? '') === 'title') $titleHtml = sd_strip_leading_emoji_html($titleHtml);
     $sEntry = $sched[SD_SCRIPTS . "/$id/script"] ?? [];
     list($kind, $text, $cron) = sd_schedule_info($sEntry);
-    $runs = sd_parse_runs(sd_read_log($id, 262144));
+    $runs = sd_log_runs($id);
     $pid = sd_running_pid($id);
     $runsToday = 0;
     foreach ($runs as $r) if (($r['start'] ?? 0) >= $today) $runsToday++;
@@ -3068,6 +3192,7 @@ function sd_list() {
       'tint' => $card['tint'] ?? '',
       'bg' => sd_hex($card['bg'] ?? ''),
       'pinned' => !empty($card['pinned']),
+      'pinHide' => !empty($card['pinHide']),             // pinned: leave it out of its category
       'askFirst' => !empty($card['askFirst']),
       'category' => $catOf['name' . sd_element($id)] ?? '',
       'schedule' => ['kind' => $kind, 'text' => $text, 'cron' => $cron, 'next' => $cron ? sd_cron_next($cron, $now) : null,

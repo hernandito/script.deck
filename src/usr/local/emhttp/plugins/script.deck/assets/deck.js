@@ -168,8 +168,8 @@
     var chips = $('#sd-chips', app), ch = chipsHtml();
     if (chips && chips.innerHTML !== ch && !selectionIn(chips)) chips.innerHTML = ch;
     var v = buildView();
-    v.secs.forEach(function (sec) {
-      var n = app.querySelector('.sd-sec[data-seckey="' + cssq(sec.key) + '"] .note');
+    flatSecs(v.secs).forEach(function (sec) {
+      var n = app.querySelector('.sd-sec[data-seckey="' + cssq(sec.key) + '"] > .sd-sh .note');
       var t = noteText(sec);
       if (n && n.textContent !== t && !selectionIn(n)) n.textContent = t;
     });
@@ -278,28 +278,46 @@
         return x - y;
       });
     };
-    var pinned = byOrder(list.filter(function (s) { return s.pinned; }), (S.order || {}).pinned);   // pinned scripts also stay in their category
+    var pinned = byOrder(list.filter(function (s) { return s.pinned; }), (S.order || {}).pinned);
+    // Pinned scripts also stay in their category, unless told not to ("Also show in its category" off).
+    var list2 = list.filter(inCategory);
     var inCat = function (id) {
       var c0 = cats.filter(function (c) { return c.id === id; })[0];
-      return byOrder(list.filter(function (s) { return s.category === id || cats.some(function (c) { return c.id === s.category && c.parent === id; }); }), c0 && c0.ids);
+      return byOrder(list2.filter(function (s) { return s.category === id || cats.some(function (c) { return c.id === s.category && c.parent === id; }); }), c0 && c0.ids);
     };
-    var other = byOrder(list.filter(function (s) { return !s.category || !cats.some(function (c) { return c.id === s.category; }); }), (S.order || {}).other);
+    var other = byOrder(list2.filter(function (s) { return !s.category || !cats.some(function (c) { return c.id === s.category; }); }), (S.order || {}).other);
     var G = groups();
-    var secOf = function (g, inTab) { return g.cats.map(function (x) { return { key: 'c' + x.cat.id, name: inTab ? x.short : x.cat.name, items: inCat(x.cat.id) }; }); };
+    // A group of categories sharing a prefix is one heading with its categories indented under it.
+    var secOf = function (g) {
+      var subs = g.cats.map(function (x) { return { key: 'c' + x.cat.id, name: g.cats.length > 1 ? x.short : x.cat.name, items: inCat(x.cat.id) }; });
+      if (g.cats.length < 2) return subs;
+      if (S.tab === 'all') subs = subs.filter(function (x) { return x.items.length; });
+      if (!subs.length) return [];
+      var all = [];
+      subs.forEach(function (x) { all = all.concat(x.items); });
+      return [{ key: g.id, name: g.name, group: true, subs: subs, items: all }];
+    };
     var PIN = { key: 'pinned', name: '📌 Pinned', items: pinned };
     var OTHER = { key: 'other', name: otherName(), note: 'scripts without a category', items: other };
     if (S.tab === 'pinned') return [PIN];
     if (S.tab === 'other') return [OTHER];
     if (S.tab !== 'all') {
       var g = G.filter(function (x) { return x.id === S.tab; })[0];
-      if (g) return secOf(g, g.cats.length > 1);
+      if (g) return secOf(g);
       S.tab = 'all';
     }
     if (pinned.length) out.push(PIN);
     ordered().forEach(function (e) {
       if (e.other) { if (other.length) out.push(OTHER); }
-      else out = out.concat(secOf(e.g, false).filter(function (x) { return x.items.length; }));
+      else out = out.concat(secOf(e.g).filter(function (x) { return x.items.length; }));
     });
+    return out;
+  }
+  function inCategory(s) { return !(s.pinned && s.pinHide); }
+  /* Every section, group headings and their sub-sections alike, in page order. */
+  function flatSecs(secs) {
+    var out = [];
+    (secs || sections()).forEach(function (x) { out.push(x); if (x.subs) out = out.concat(x.subs); });
     return out;
   }
 
@@ -307,11 +325,11 @@
   function buildView() {
     var tabs = [{ id: 'all', name: 'All', n: S.data.scripts.length }];
     if (S.data.scripts.some(function (s) { return s.pinned; })) tabs.push({ id: 'pinned', name: '📌 Pinned', n: S.data.scripts.filter(function (s) { return s.pinned; }).length });
-    var otherN = S.data.scripts.filter(function (s) { return !s.category; }).length;
+    var otherN = S.data.scripts.filter(function (s) { return !s.category && inCategory(s); }).length;
     ordered().forEach(function (e) {
       if (e.other) { if (otherN) tabs.push({ id: 'other', name: otherName(), n: otherN }); return; }
       var ids = e.g.cats.map(function (x) { return x.cat.id; });
-      tabs.push({ id: e.g.id, name: e.g.name, n: S.data.scripts.filter(function (s) { return ids.indexOf(s.category) >= 0; }).length });
+      tabs.push({ id: e.g.id, name: e.g.name, n: S.data.scripts.filter(function (s) { return ids.indexOf(s.category) >= 0 && inCategory(s); }).length });
     });
     if (!tabs.some(function (t) { return t.id === S.tab; })) S.tab = 'all';
     return { tabs: tabs, secs: sections() };
@@ -319,7 +337,7 @@
   /* Changes only when the layout changes - not when a script runs or a clock ticks. */
   function layoutSig() {
     var v = buildView();
-    return JSON.stringify([S.tab, S.q, S.other, v.tabs, v.secs.map(function (s) { return [s.key, s.name, s.items.map(function (i) { return i.id; })]; })]);
+    return JSON.stringify([S.tab, S.q, S.other, v.tabs, flatSecs(v.secs).map(function (s) { return [s.key, s.name, !!s.group, s.items.map(function (i) { return i.id; })]; })]);
   }
   function chipsHtml() {
     var c = counts();
@@ -345,26 +363,32 @@
         '<span class="nm">' + esc(t.name) + '</span><span class="sd-badge">' + t.n + '</span></button>';
     });
     h += '<button type="button" class="sd-cat sq" data-managecats aria-label="Manage categories" title="Manage categories: add, rename, delete, reorder"><i class="fa fa-cog" aria-hidden="true"></i></button>';
-    var anyOpen = secs.some(function (x) { return !S.shut[x.key]; });
+    var anyOpen = flatSecs(secs).some(function (x) { return !S.shut[x.key]; });
     h += '<span class="grow"></span><button type="button" class="sd-linkbtn" data-allsec="' + (anyOpen ? 'shut' : 'open') + '">' + (anyOpen ? 'Collapse all' : 'Expand all') + '</button></nav>';
 
     if (!secs.length || secs.every(function (x) { return !x.items.length; })) h += '<div class="sd-empty">' + (S.q ? 'No script matches “' + esc(S.q) + '”.' : 'Nothing here yet.') + '</div>';
     cardCache = {};
-    secs.forEach(function (sec) {
+    var secHtml = function (sec, sub) {
       var arranging = S.reorder === sec.key;
       var shut = !!S.shut[sec.key] && !S.q && !arranging;
-      var tools = arranging
+      var tools = sec.group ? '' : arranging
         ? '<span class="sd-arrbar"><span class="sd-help">Drag the tiles, or use ◀ ▶</span>' +
           '<button type="button" class="sd-btn sm" data-arrcancel>Cancel</button><button type="button" class="sd-btn sm accent" data-arrdone="' + esc(sec.key) + '">Done</button></span>'
         : (sec.items.length > 1 && !S.q && !S.reorder ? '<button type="button" class="sd-arrbtn" data-arrange="' + esc(sec.key) + '" aria-label="Arrange the tiles of ' + esc(sec.name) + '" title="Arrange tiles">' + svg(I.arrange, 15) + '</button>' : '');
-      h += '<section class="sd-sec' + (shut ? ' shut' : '') + (arranging ? ' arranging' : '') + '" data-seckey="' + esc(sec.key) + '"><div class="sd-sh">' +
+      var o = '<section class="sd-sec' + (sec.group ? ' grp' : '') + (sub ? ' sub' : '') + (shut ? ' shut' : '') + (arranging ? ' arranging' : '') + '" data-seckey="' + esc(sec.key) + '"><div class="sd-sh">' +
         '<button type="button" class="sd-shbtn" data-sec="' + esc(sec.key) + '" aria-expanded="' + (!shut) + '"' + (arranging ? ' disabled' : '') + '><span class="chev">' + svg(I.chev, 14) + '</span>' +
         '<span class="sd-catlabel">' + esc(sec.name) + '</span><span class="sd-badge">' + sec.items.length + '</span></button>' +
         '<span class="note">' + esc(noteText(sec)) + '</span><span class="rule"></span>' + tools + '</div>' +
-        '<div class="sd-acc"><div><div class="sd-grid">';
-      sec.items.forEach(function (s) { var c = cardHtml(s, false, arranging); if (!arranging) cardCache[s.id] = c; h += c; });
-      h += '</div></div></div></section>';
-    });
+        '<div class="sd-acc"><div>';
+      if (sec.group) sec.subs.forEach(function (x) { o += secHtml(x, true); });
+      else {
+        o += '<div class="sd-grid">';
+        sec.items.forEach(function (s) { var c = cardHtml(s, false, arranging); if (!arranging) cardCache[s.id] = c; o += c; });
+        o += '</div>';
+      }
+      return o + '</div></div></section>';
+    };
+    secs.forEach(function (sec) { h += secHtml(sec, false); });
     app.innerHTML = h;
     lastLayout = layoutSig();
     if (active) { var q = $('#sd-q'); q.focus(); q.setSelectionRange(q.value.length, q.value.length); }
@@ -401,7 +425,7 @@
     S.shut[key] = shut;
     if (!shut) delete S.shut[key];
     var sec = app.querySelector('.sd-sec[data-seckey="' + cssq(key) + '"]');
-    if (sec) { sec.classList.toggle('shut', !!shut); var b = $('.sd-shbtn', sec); if (b) b.setAttribute('aria-expanded', String(!shut)); }
+    if (sec) { sec.classList.toggle('shut', !!shut); var b = sec.querySelector(':scope > .sd-sh .sd-shbtn'); if (b) b.setAttribute('aria-expanded', String(!shut)); }
     var anyOpen = Array.prototype.some.call(app.querySelectorAll('.sd-sec'), function (x) { return !x.classList.contains('shut'); });
     var lb = $('[data-allsec]', app);
     if (lb) { lb.dataset.allsec = anyOpen ? 'shut' : 'open'; lb.textContent = anyOpen ? 'Collapse all' : 'Expand all'; }
@@ -454,6 +478,8 @@
     if (!s) return;
     if (s.askFirst && !confirm('Run “' + s.plain + '”?')) return;
     if (s.vars && (s.vars.foregroundOnly || s.vars.directPHP)) return runClassic(s);
+    // A script that asks a question first: the run window opens and asks.
+    if (askOf(s)) return openRun(id);
     // "Run" opens the run window: live output, and closing it stops the script
     // (like Unraid's own script window). "Run in background" just starts it.
     if (watch) { openRun(id); return startRun('live'); }
@@ -463,10 +489,26 @@
     }).catch(function (e) { toast(e.message, true); });
   }
 
+  /* A question the script asks before it runs (User Scripts' #argumentDescription=...).
+     Choices can be offered at the end: "What to do? [report:📋 Report only|clean:🧹 Clean up]".
+     The answer becomes the script's $1 (and $2 ... if it has spaces). */
+  function askOf(s) {
+    var d = s && s.vars && s.vars.argumentDescription;
+    if (!d) return null;
+    var m = d.match(/\[([^\]]*\|[^\]]*)\]\s*$/);
+    var choices = m ? m[1].split('|').map(function (c) {
+      var i = c.indexOf(':'), v = (i > 0 ? c.slice(0, i) : c).trim();
+      return { v: v, label: (i > 0 ? c.slice(i + 1) : c).trim() || v };
+    }).filter(function (c) { return c.v; }) : null;
+    return { q: (m ? d.slice(0, m.index) : d).trim(), choices: choices, def: s.vars.argumentDefault || '' };
+  }
+
   /* ---------- the run window ---------- */
   function openRun(id) {
     ensureOverlay();
-    S.modal = { kind: 'run', id: id, mode: null, startAt: null, follow: true, find: '', fmt: null, log: null };
+    var ask = askOf(byId(id));
+    S.modal = { kind: 'run', id: id, mode: null, startAt: null, follow: true, find: '', fmt: null, log: null,
+      ask: ask ? { value: ask.def || (ask.choices ? ask.choices[0].v : '') } : null };
     renderModal();
     showOverlay();
     loadLog();
@@ -480,7 +522,9 @@
     m.startAt = Math.floor(Date.now() / 1000) - 2;            // until a run this new appears, show "Starting…"
     m.follow = true;
     renderModal();
-    post({ a: 'run', id: m.id }).then(function () {
+    var p = { a: 'run', id: m.id };
+    if (m.ask) { p.args = m.ask.value; m.asked = m.ask.value; }
+    post(p).then(function () {
       setTimeout(function () { refresh(); loadLog(); }, 500);
     }).catch(function (e) { m.startAt = null; m.mode = null; renderModal(); toast(e.message, true); });
   }
@@ -503,6 +547,17 @@
       '<button type="button" class="sd-btn" data-rbg' + (busy ? ' disabled' : '') + '>Run in background</button>' +
       '<button type="button" class="sd-btn" data-rdetails' + (detailsOk ? '' : ' disabled title="Available when the script finishes (closing this window would stop it)"') + '>Details</button>' +
       (st.phase === 'done' ? '<button type="button" class="sd-btn accent push" data-rdone>Done</button>' : '') + '</div>';
+    var ask = m.ask && askOf(s);
+    if (ask) {
+      h += '<div class="sd-ask' + (busy ? ' off' : '') + '"><span class="q">❓ ' + esc(ask.q || 'Argument for this run') + '</span>';
+      if (ask.choices) ask.choices.forEach(function (c) {
+        var on = m.ask.value === c.v;
+        h += '<button type="button" class="sd-btn sm' + (on ? ' on' : '') + '" data-ans="' + esc(c.v) + '" aria-pressed="' + on + '"' + (busy ? ' disabled' : '') + '>' + esc(c.label) + '</button>';
+      });
+      else h += '<input class="sd-input" id="sd-arg" value="' + esc(m.ask.value) + '" aria-label="' + esc(ask.q || 'Argument') + '"' + (busy ? ' disabled' : '') + '>';
+      h += busy && m.asked != null ? '<span class="sd-help">running with: <b>' + esc(m.asked || '(nothing)') + '</b></span>' : '<span class="sd-help">then press Run</span>';
+      h += '</div>';
+    }
     var status, cls = '';
     if (st.phase === 'starting') { status = 'Starting…'; cls = 'run'; }
     else if (st.phase === 'running') { status = '● Running <span class="el">' + (st.run && st.run.start ? elapsed(st.run.start) : '') + '</span>' + (m.mode === 'live' ? ' · closing this window stops it' : m.mode === 'bg' ? ' · in the background' : ''); cls = 'run'; }
@@ -741,7 +796,9 @@
     var m = S.modal, box = ov.firstChild;
     var ob0 = $('.sd-rout', box), keep = soft && ob0 ? ob0.scrollTop : null;
     var atBottom = !ob0 || ob0.scrollTop + ob0.clientHeight >= ob0.scrollHeight - 8;
+    var typing = document.activeElement && document.activeElement.id === 'sd-arg' ? [document.activeElement.selectionStart, document.activeElement.selectionEnd] : null;
     box.innerHTML = runHtml(s);
+    if (typing) { var ai = $('#sd-arg', box); if (ai) { ai.focus(); ai.setSelectionRange(typing[0], typing[1]); } }
     var ob = $('.sd-rout', box), st = runState(m, s);
     if (st.phase === 'starting') { ob.className = 'sd-out sd-rout plain'; ob.textContent = 'Starting… the output appears here as soon as the script prints something.'; }
     else if (st.run) fillOutput(ob, st.run.text, m.fmt || S.fmtPref || (isHtml(st.run.text) ? 'html' : 'plain'), '');
@@ -853,7 +910,7 @@
     S.modal.etab = 'card';
     S.modal.dirty = false;
     var custom = s.schedule.custom || '';
-    S.modal.draft = { title: s.title, desc: s.desc, icon: c, tint: s.tint || '', bg: s.bg || '', pinned: s.pinned, askFirst: s.askFirst,
+    S.modal.draft = { title: s.title, desc: s.desc, icon: c, tint: s.tint || '', bg: s.bg || '', pinned: s.pinned, pinShow: !s.pinHide, askFirst: s.askFirst,
       category: s.category || '', src: 'suggested', emojiOpen: false, script: null,
       freq: s.schedule.freq || 'disabled', cron: custom || '0 3 * * *', builder: parseCron(custom || '0 3 * * *') };
     renderModal();
@@ -951,8 +1008,9 @@
     h += '<div class="sd-inline"><label class="sd-inline" style="gap:10px"><span class="sd-k">Category</span><select class="sd-select" id="sd-cat"><option value="">' + esc(otherName()) + ' (no category)</option>' +
       cats.map(function (c) { return '<option value="' + esc(c.id) + '"' + (c.id === d.category ? ' selected' : '') + '>' + esc(c.name) + '</option>'; }).join('') + '</select></label>' +
       '<label class="sd-chk"><input type="checkbox" id="sd-pinned"' + (d.pinned ? ' checked' : '') + '> 📌 Pin to top</label>' +
+      '<label class="sd-chk' + (d.pinned ? '' : ' off') + '" title="Only applies while the script is pinned"><input type="checkbox" id="sd-pinshow"' + (d.pinShow ? ' checked' : '') + (d.pinned ? '' : ' disabled') + '> Also show in its category</label>' +
       '<label class="sd-chk"><input type="checkbox" id="sd-ask"' + (d.askFirst ? ' checked' : '') + '> Ask before running</label></div>' +
-      '<p class="sd-help" style="margin-top:10px">Pinned scripts also stay in their category.' + (S.data.catsShared ? ' Categories are shared with User Scripts Enhanced.' : '') + '</p>';
+      '<p class="sd-help" style="margin-top:10px">A pinned script is shown in Pinned and, unless you untick “Also show in its category”, in its category too. Unpinned, it is always back in its category.' + (S.data.catsShared ? ' Categories are shared with User Scripts Enhanced.' : '') + '</p>';
     return h;
   }
   function suggest(s, icons) {
@@ -1075,7 +1133,7 @@
     if (btn) { btn.disabled = true; btn.textContent = 'Saving…'; }
     var unlock = function () { var b = $('[data-save]', ov); if (b) { b.disabled = false; b.textContent = 'Save'; } };
     if (rich) d.title = rich.innerHTML;
-    var p = { a: 'save', id: s.id, title: d.title, desc: d.desc, icon: JSON.stringify(d.icon || {}), tint: d.tint, bg: d.bg, pinned: d.pinned ? '1' : '0', askFirst: d.askFirst ? '1' : '0' };
+    var p = { a: 'save', id: s.id, title: d.title, desc: d.desc, icon: JSON.stringify(d.icon || {}), tint: d.tint, bg: d.bg, pinned: d.pinned ? '1' : '0', pinHide: d.pinned && !d.pinShow ? '1' : '0', askFirst: d.askFirst ? '1' : '0' };
     if (d.category !== (s.category || '')) p.category = d.category;
     var jobs = [post(p)];
     if (d.freq !== s.schedule.freq || (d.freq === 'custom' && d.cron.trim() !== (s.schedule.custom || '').trim())) {
@@ -1168,7 +1226,7 @@
     var ds = t.dataset;
     if (ds.tab) { S.tab = ds.tab; save('tab', S.tab); renderPage(); return; }
     if (ds.sec) { var sh = !S.shut[ds.sec]; toggleSection(ds.sec, sh); return; }
-    if (ds.allsec) { var shut = ds.allsec === 'shut'; sections().forEach(function (x) { toggleSection(x.key, shut); }); return; }
+    if (ds.allsec) { var shut = ds.allsec === 'shut'; flatSecs().forEach(function (x) { toggleSection(x.key, shut); }); return; }
     if (ds.managecats !== undefined) return openCats();
     if (ds.arrange) { S.reorder = ds.arrange; renderPage(); return; }
     if (ds.arrcancel !== undefined) { S.reorder = null; renderPage(); return; }
@@ -1187,6 +1245,7 @@
     if (ds.close !== undefined) return closeModal();
     if (m.kind === 'run') {
       if (ds.rclose !== undefined) return closeRun();
+      if (ds.ans !== undefined) { m.ask.value = ds.ans; return renderModal(true); }
       if (ds.rrun !== undefined) return startRun('live');
       if (ds.rbg !== undefined) return startRun('bg');
       if (ds.rdone !== undefined) return closeModal();
@@ -1265,12 +1324,14 @@
   }
   function onKey(e) {
     if (e.target.id === 'sd-emoji-in' && e.key === 'Enter') { e.preventDefault(); useOwnEmoji(); return; }
+    if (e.target.id === 'sd-arg' && e.key === 'Enter') { e.preventDefault(); startRun('live'); return; }
     if (e.target.id === 'sd-rich' && e.key === 'Enter') { e.preventDefault(); document.execCommand('insertLineBreak'); changed(); }
   }
   function onInput(e) {
     var t = e.target, m = S.modal;
     if (t.id === 'sd-q') { S.q = t.value; renderPage(); return; }
     if (!m) return;
+    if (t.id === 'sd-arg' && m.ask) { m.ask.value = t.value; return; }
     if (t.dataset && t.dataset.cname !== undefined) { m.list[+t.dataset.cname].name = t.value; m.dirty = true; return; }
     if (t.id === 'sd-find') { m.find = t.value; renderModal(true); return; }
     if (t.id === 'sd-rich') return changed();
@@ -1295,7 +1356,13 @@
     }
     if (!m) return;
     if (t.id === 'sd-follow') { m.follow = t.checked; if (m.follow && m.log) m.run = m.log.runs.length - 1; renderModal(true); return; }
-    if (t.id === 'sd-pinned') { m.draft.pinned = t.checked; m.dirty = true; return updatePreview(); }
+    if (t.id === 'sd-pinned') {
+      m.draft.pinned = t.checked; m.dirty = true;
+      var ps = $('#sd-pinshow', ov);
+      if (ps) { ps.disabled = !t.checked; ps.parentNode.classList.toggle('off', !t.checked); }
+      return updatePreview();
+    }
+    if (t.id === 'sd-pinshow') { m.draft.pinShow = t.checked; m.dirty = true; return; }
     if (t.id === 'sd-ask') { m.draft.askFirst = t.checked; m.dirty = true; return updatePreview(); }
     if (t.id === 'sd-cat') { m.draft.category = t.value; m.dirty = true; return; }
     if (t.id === 'sd-bmode') {

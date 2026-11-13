@@ -168,39 +168,68 @@ function sd_parse_time($s) {
   return $d ? $d->getTimestamp() : null;
 }
 
-/** Split a User Scripts log into runs: [start, end, aborted, from, to] (line offsets). */
-function sd_parse_runs($text) {
-  $runs = [];
-  $lines = explode("\n", $text);
-  foreach ($lines as $i => $line) {
-    if (preg_match('/Script Starting (\w{3} \d{1,2}, \d{4}\s+\d{1,2}:\d{2}\.\d{2})/', $line, $m)) {
-      if ($runs) $runs[count($runs) - 1]['to'] = $i - 1;
-      $runs[] = ['start' => sd_parse_time($m[1]), 'end' => null, 'aborted' => false, 'from' => $i, 'to' => count($lines) - 1];
-    } elseif ($runs && preg_match('/Script Finished (\w{3} \d{1,2}, \d{4}\s+\d{1,2}:\d{2}\.\d{2})/', $line, $m)) {
-      $runs[count($runs) - 1]['end'] = sd_parse_time($m[1]);
-    } elseif ($runs && strpos($line, 'Execution was aborted by user') !== false) {
-      $runs[count($runs) - 1]['aborted'] = true;
-    }
-  }
-  return $runs;
-}
-
-function sd_run_text($lines, $r) {
-  $t = implode("\n", array_slice($lines, $r['from'], $r['to'] - $r['from'] + 1));
-  if (strlen($t) > SD_RUN_MAX) $t = "… (earlier output trimmed)\n" . substr($t, -SD_RUN_MAX);
-  return $t;
-}
-
-/** Last ~2 MB of a log is plenty and keeps huge logs from stalling the page. */
-function sd_read_log($id, $max = 2097152) {
+/** Runs in a User Scripts log: [start, end, aborted, from, to] (byte offsets; to = null means
+ *  "until end of file"). The whole file is scanned - a run that prints 100,000 lines must
+ *  still be found - but only once: the result is cached in /tmp and later calls only read
+ *  what was appended since. */
+function sd_log_runs($id) {
   $f = sd_log_file($id);
-  if (!is_file($f)) return '';
+  clearstatcache(true, $f);
+  if (!is_file($f)) return [];
   $size = filesize($f);
-  $h = fopen($f, 'r');
-  if ($size > $max) { fseek($h, -$max, SEEK_END); fgets($h); }
-  $t = stream_get_contents($h);
+  $cdir = '/tmp/script.deck.idx';
+  $cfile = $cdir . '/' . rawurlencode($id) . '.json';
+  $c = sd_json_read($cfile, []);
+  // a deleted-and-recreated log gets a fresh scan (inode plus its first bytes identify it)
+  $ino = @fileinode($f) . ':' . md5((string)@file_get_contents($f, false, null, 0, 256));
+  if (!isset($c['pos'], $c['runs'], $c['ino']) || $c['ino'] !== $ino || $c['pos'] > $size) $c = ['ino' => $ino, 'pos' => 0, 'runs' => []];
+  if ($c['pos'] < $size) {
+    $h = fopen($f, 'r');
+    fseek($h, $c['pos']);
+    $runs = $c['runs'];
+    while (true) {
+      $at = ftell($h);
+      $line = fgets($h);
+      if ($line === false) break;
+      if (substr($line, -1) !== "\n") break;              // half-written line: read it next time
+      $c['pos'] = $at + strlen($line);
+      if (strpos($line, 'Script ') === false && strpos($line, 'Execution was aborted') === false) continue;
+      if (preg_match('/Script Starting (\w{3} \d{1,2}, \d{4}\s+\d{1,2}:\d{2}\.\d{2})/', $line, $m)) {
+        if ($runs) $runs[count($runs) - 1]['to'] = $at;
+        $runs[] = ['start' => sd_parse_time($m[1]), 'end' => null, 'aborted' => false, 'from' => $at, 'to' => null];
+      } elseif ($runs && preg_match('/Script Finished (\w{3} \d{1,2}, \d{4}\s+\d{1,2}:\d{2}\.\d{2})/', $line, $m)) {
+        $runs[count($runs) - 1]['end'] = sd_parse_time($m[1]);
+      } elseif ($runs && strpos($line, 'Execution was aborted by user') !== false) {
+        $runs[count($runs) - 1]['aborted'] = true;
+      }
+    }
+    fclose($h);
+    $c['runs'] = array_slice($runs, -(SD_KEEP_RUNS + 5));
+    @mkdir($cdir, 0755, true);
+    sd_json_write($cfile, $c, 0);
+  }
+  return $c['runs'];
+}
+
+/** One run's output; very long runs keep only their last SD_RUN_MAX bytes. */
+function sd_run_text($id, $r) {
+  $h = @fopen(sd_log_file($id), 'r');
+  if (!$h) return '';
+  $to = $r['to'] ?? (fstat($h)['size']);
+  $from = $r['from'];
+  $cut = $to - $from > SD_RUN_MAX;
+  if ($cut) { fseek($h, $to - SD_RUN_MAX); fgets($h); } else fseek($h, $from);
+  $len = $to - ftell($h);
+  $t = $len > 0 ? (string)fread($h, $len) : '';
   fclose($h);
-  return str_replace("\r", '', $t);
+  $t = rtrim(str_replace("\r", '', $t), "\n");
+  if ($cut) {
+    // keep the "Script Starting" line so the run still reads as a run
+    $h = fopen(sd_log_file($id), 'r'); fseek($h, $from);
+    $first = rtrim((string)fgets($h), "\r\n"); fclose($h);
+    $t = $first . "\n… (earlier output trimmed - the full log is in /tmp/user.scripts)\n" . $t;
+  }
+  return $t;
 }
 
 /* ---------- run history (survives reboots) ---------- */
@@ -225,9 +254,7 @@ function sd_archive_all() {
 }
 
 function sd_archive($id) {
-  $text = sd_read_log($id);
-  if ($text === '') return 0;
-  $runs = sd_parse_runs($text);
+  $runs = sd_log_runs($id);
   if (!$runs) return 0;
   if (sd_running_pid($id)) array_pop($runs);           // still writing
   $runs = array_slice($runs, -SD_KEEP_RUNS);           // only the newest are kept anyway
@@ -235,13 +262,12 @@ function sd_archive($id) {
   $index = sd_json_read("$dir/runs.json", []);
   $have = [];
   foreach ($index as $r) $have[$r['start']] = true;
-  $lines = explode("\n", $text);
   $added = 0;
   foreach ($runs as $r) {
     if (!$r['start'] || isset($have[$r['start']])) continue;
     if (!$r['end'] && !$r['aborted']) continue;          // unfinished (e.g. cut by a reboot)
     @mkdir($dir, 0755, true);
-    file_put_contents("$dir/{$r['start']}.log", sd_run_text($lines, $r));
+    file_put_contents("$dir/{$r['start']}.log", sd_run_text($id, $r));
     $index[] = ['start' => $r['start'], 'end' => $r['end'], 'aborted' => $r['aborted']];
     $added++;
   }
@@ -262,21 +288,22 @@ function sd_archive_throttled() {
 
 /** Live runs from /tmp plus saved runs from history, oldest first, each with its text. */
 function sd_all_runs($id, $limit = SD_KEEP_RUNS) {
-  $text = sd_read_log($id);
-  $lines = explode("\n", $text);
-  $live = sd_parse_runs($text);
+  $live = sd_log_runs($id);
   $running = sd_running_pid($id) > 0;
   $out = [];
   foreach (sd_hist_index($id) as $r) $out[$r['start']] = $r + ['saved' => true];
   foreach ($live as $i => $r) {
     $out[$r['start'] ?: -$i] = ['start' => $r['start'], 'end' => $r['end'], 'aborted' => $r['aborted'], 'saved' => false,
-      'live' => $running && $i === count($live) - 1, 'text' => sd_run_text($lines, $r)];
+      'live' => $running && $i === count($live) - 1, 'text' => null, 'r' => $r];
   }
   ksort($out);
   $out = array_slice(array_values($out), -$limit);
   foreach ($out as &$r) {
-    if (!isset($r['text'])) $r['text'] = (string)@file_get_contents(sd_hist_dir($id) . "/{$r['start']}.log");
+    // only the runs actually returned get their text read
+    if (isset($r['r'])) { $r['text'] = sd_run_text($id, $r['r']); unset($r['r']); }
+    elseif (!isset($r['text'])) $r['text'] = (string)@file_get_contents(sd_hist_dir($id) . "/{$r['start']}.log");
   }
+  unset($r);
   return $out;
 }
 
@@ -590,7 +617,7 @@ function sd_list() {
     if ($icon['t'] === 'emoji' && ($icon['auto'] ?? '') === 'title') $titleHtml = sd_strip_leading_emoji_html($titleHtml);
     $sEntry = $sched[SD_SCRIPTS . "/$id/script"] ?? [];
     list($kind, $text, $cron) = sd_schedule_info($sEntry);
-    $runs = sd_parse_runs(sd_read_log($id, 262144));
+    $runs = sd_log_runs($id);
     $pid = sd_running_pid($id);
     $runsToday = 0;
     foreach ($runs as $r) if (($r['start'] ?? 0) >= $today) $runsToday++;
@@ -610,6 +637,7 @@ function sd_list() {
       'tint' => $card['tint'] ?? '',
       'bg' => sd_hex($card['bg'] ?? ''),
       'pinned' => !empty($card['pinned']),
+      'pinHide' => !empty($card['pinHide']),             // pinned: leave it out of its category
       'askFirst' => !empty($card['askFirst']),
       'category' => $catOf['name' . sd_element($id)] ?? '',
       'schedule' => ['kind' => $kind, 'text' => $text, 'cron' => $cron, 'next' => $cron ? sd_cron_next($cron, $now) : null,

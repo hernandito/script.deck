@@ -78,14 +78,14 @@
 :is(.sd,.sd-ov) .sd-shbtn:hover .sd-catlabel{color:var(--accent-ink)}
 :is(.sd,.sd-ov) .sd-shbtn:hover .chev{color:var(--accent-ink)}
 .sd-shbtn .chev{display:inline-flex;transition:transform .25s ease;color:#555}
-.sd-sec.shut .sd-shbtn .chev{transform:rotate(-90deg)}
+.sd-sec.shut>.sd-sh .sd-shbtn .chev{transform:rotate(-90deg)}
 .sd-catlabel{font-size:var(--cat-size);font-weight:700;color:var(--ink);letter-spacing:0}
 .sd-sh .note{font-size:12.5px;color:var(--muted)}
 .sd-sh .rule{flex:1;height:1px;background:#d6d6d6}
 .sd-acc{display:grid;grid-template-rows:1fr;transition:grid-template-rows .3s ease,opacity .25s ease,visibility 0s;opacity:1;visibility:visible}
 .sd-acc>div{min-height:0;overflow:hidden}
 /* Collapsed content is really hidden (no clicks, no Tab focus) once the closing animation ends. */
-.sd-sec.shut .sd-acc{grid-template-rows:0fr;opacity:0;visibility:hidden;transition:grid-template-rows .3s ease,opacity .25s ease,visibility 0s .3s}
+.sd-sec.shut>.sd-acc{grid-template-rows:0fr;opacity:0;visibility:hidden;transition:grid-template-rows .3s ease,opacity .25s ease,visibility 0s .3s}
 .sd-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(172px,1fr));gap:10px;padding:2px 2px 4px;margin-left:40px}
 .sd-empty{color:var(--muted);padding:20px 0}
 
@@ -342,6 +342,21 @@ div.title:first-of-type{margin-bottom:8px;display:none}
 .sd-ov a{color:var(--accent-ink);text-decoration:none;font-size:12px}
 :is(.sd,.sd-ov) .sd-shbtn{display:inline-flex;align-items:center;gap:2px;padding:3px 6px 3px 2px!important;border-radius:7px;cursor:pointer;color:var(--ink)!important}
 .sd-shbtn .sd-badge,.sd-catrow .sd-badge{margin-top:0;margin-left:6px}
+
+/* ---------- a script's question before it runs (#argumentDescription) ---------- */
+.sd-ask{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin:0 24px 2px;padding:10px 14px;border:1px solid #e0c46c;background:#fff8e1;border-radius:10px}
+.sd-ask .q{font-weight:600;color:var(--ink);margin-right:6px}
+.sd-ask.off{opacity:.65}
+:is(.sd,.sd-ov) .sd-ask .sd-btn.on{background:#ffe271!important;border-color:#595959!important;color:#000!important}
+.sd-ask .sd-input{min-width:220px}
+.sd-chk.off{opacity:.5}
+
+/* ---------- grouped categories ("Backups - Daily", "Backups - Weekly"...) as an outline ---------- */
+.sd-sec.grp>.sd-acc>div{padding-top:4px}
+.sd-sec.sub{margin-left:30px;margin-bottom:4px}
+.sd-sec.sub .sd-catlabel{font-size:16px;font-weight:600;color:var(--ink2)}
+.sd-sec.sub .sd-sh .rule{background:#e2e2e2}
+.sd-sec.sub .sd-grid{margin-left:30px}
 
 @media (prefers-reduced-motion:reduce){.sd-acc,.sd-ov,.sd-modal,.sd-shbtn .chev{transition:none!important}}
 @media (max-width:700px){

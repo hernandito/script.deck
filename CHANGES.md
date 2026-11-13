@@ -1,4 +1,5 @@
-- First public release: tiles for every User Scripts script, grouped and arranged by category, with live status.
-- Run window with live output; closing it stops the script. Details window with overview, run history and logs that survive reboots.
-- Edit titles (colours, bold, line breaks), icons (emoji, containers, plugins, built-in, uploads), colours, schedules and the script itself.
-- Manage, rename and reorder categories (shared with User Scripts Enhanced); arrange tiles within a category.
+- Fixed: scripts that print a lot (e.g. rsync backups) showed no runs; the whole log is now indexed, not just its end.
+- Pinned scripts get "Also show in its category" (on by default); unpinning always puts a script back in its category.
+- Categories sharing a prefix ("Backups - Daily", "Backups - Weekly") show as one heading with indented sub-sections.
+- Scripts with a question (#argumentDescription) ask it in the run window before starting; choices can be offered as [value:Label|value:Label].
+- First public release: tiles, live run window, run history, editing of titles, icons, schedules and scripts, category management.

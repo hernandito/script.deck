@@ -76,6 +76,18 @@ switch ($a) {
     @mkdir(SD_TMP . '/finished', 0755, true);
     $body = str_replace("\r", '', (string)file_get_contents($path));
     if (strpos($body, '#!') !== 0) $body = "#!/bin/bash\n" . $body;
+    // A script that asks a question (#argumentDescription=...) gets the answer as $1 $2 ...
+    // User Scripts appends #argumentDefault to the command line; "set --" replaces that for this run.
+    if (isset($_POST['args']) && $vars['argumentDescription'] !== '' && !$vars['directPHP'] && preg_match('#^\#!\S*(bash|sh)\b#', $body)) {
+      $words = preg_split('/\s+/', trim(mb_substr((string)$_POST['args'], 0, 500)), -1, PREG_SPLIT_NO_EMPTY);
+      $set = 'set -- ' . implode(' ', array_map('escapeshellarg', $words)) . "   # answer given in Script Deck\n";
+      // after the header comments, so User Scripts still reads its #variables
+      $lines = explode("\n", $body);
+      $at = count($lines);
+      foreach ($lines as $i => $l) if ($i > 0 && trim($l) !== '' && $l[0] !== '#') { $at = $i; break; }
+      array_splice($lines, $at, 0, [rtrim($set)]);
+      $body = implode("\n", $lines);
+    }
     file_put_contents($tmp, $body);
     chmod($tmp, 0755);
     // Same launcher the original "Run In Background" button uses.
@@ -125,6 +137,8 @@ switch ($a) {
     if (isset($_POST['tint'])) $card['tint'] = preg_match('/^([a-z]{0,12}|#[0-9a-f]{6})$/i', $_POST['tint']) ? strtolower($_POST['tint']) : '';
     if (isset($_POST['bg'])) $card['bg'] = sd_hex($_POST['bg']);
     if (isset($_POST['pinned'])) $card['pinned'] = $_POST['pinned'] === '1';
+    if (isset($_POST['pinHide'])) $card['pinHide'] = $_POST['pinHide'] === '1';
+    if (empty($card['pinned'])) unset($card['pinHide']);   // unpinned: back in its category
     if (isset($_POST['askFirst'])) $card['askFirst'] = $_POST['askFirst'] === '1';
     $cards[$id] = array_filter($card, function ($v) { return $v !== '' && $v !== false && $v !== null; });
     if (!$cards[$id]) unset($cards[$id]);
@@ -164,7 +178,7 @@ switch ($a) {
     $id = need_id();
     $cards = sd_json_read(SD_CARDS, []);
     $cards[$id]['pinned'] = ($_POST['pinned'] ?? '') === '1';
-    if (!$cards[$id]['pinned']) unset($cards[$id]['pinned']);
+    if (!$cards[$id]['pinned']) unset($cards[$id]['pinned'], $cards[$id]['pinHide']);   // unpinned: back in its category
     if (!$cards[$id]) unset($cards[$id]);
     sd_json_write(SD_CARDS, $cards);
     out(['ok' => true]);
