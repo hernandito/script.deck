@@ -1,0 +1,5 @@
+#!/bin/bash
+# Unraid runs this just before the array stops (and so before a reboot):
+# save script run history while /mnt/user/appdata is still mounted.
+/usr/bin/php /usr/local/emhttp/plugins/script.deck/include/archive.php >/dev/null 2>&1
+exit 0

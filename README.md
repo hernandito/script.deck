@@ -1,0 +1,3 @@
+# Script Deck
+
+Script Deck is a visual front end for the Unraid **User Scripts** plugin: every script becomes a tile with its own icon, formatted title and live status, grouped by category, and one click runs it in a window that shows the output live (closing it stops the script, just like Unraid's own window). Each script can be edited in place, including its title, icon, colours, schedule and the script itself, and its run history is kept across reboots. It works on top of User Scripts (and shares categories with User Scripts Enhanced when installed) without changing either, and installs from a single file with no internet needed at boot. Install it from **Plugins → Install Plugin** with `https://raw.githubusercontent.com/hernandito/script.deck/main/script.deck.plg`.

@@ -1,0 +1,4 @@
+- First public release: tiles for every User Scripts script, grouped and arranged by category, with live status.
+- Run window with live output; closing it stops the script. Details window with overview, run history and logs that survive reboots.
+- Edit titles (colours, bold, line breaks), icons (emoji, containers, plugins, built-in, uploads), colours, schedules and the script itself.
+- Manage, rename and reorder categories (shared with User Scripts Enhanced); arrange tiles within a category.

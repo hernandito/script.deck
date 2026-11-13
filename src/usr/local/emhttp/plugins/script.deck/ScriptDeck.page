@@ -1,0 +1,14 @@
+Menu="Utilities"
+Title="Script Deck"
+Icon="script.deck.png"
+Markdown="false"
+---
+<?php
+/* Script Deck - a visual front end for the User Scripts plugin.
+ * Everything is drawn by assets/deck.js from include/api.php. */
+?>
+<link rel="stylesheet" href="<?autov('/plugins/script.deck/assets/deck.css')?>">
+<div id="sd-app" class="sd" data-api="/plugins/script.deck/include/api.php">
+  <div class="sd-loading">Loading scripts…</div>
+</div>
+<script src="<?autov('/plugins/script.deck/assets/deck.js')?>"></script>
