@@ -358,6 +358,13 @@ div.title:first-of-type{margin-bottom:8px;display:none}
 .sd-sec.sub .sd-sh .rule{background:#e2e2e2}
 .sd-sec.sub .sd-grid{margin-left:30px}
 
+/* ---------- design tweaks (2026-11-13, round 3) ---------- */
+.sd-stat.ok .t{color:#14632f;font-weight:400;font-size:11px}
+.sd-search{margin-left:auto;flex:0 1 300px;display:flex;align-items:center;gap:8px;height:32px;padding:0 12px;background:#fff;border:1px solid #d0d0d0;border-radius:10px;margin-top:-10px}
+.sd-sec.sub{margin-left:40px;margin-bottom:4px}
+.sd-sec.sub .sd-catlabel{font-size:18px;font-weight:700;color:var(--ink2)}
+:is(.sd,.sd-ov) .sd-btn.sm{height:32px;padding:0 10px;font-size:12.5px;border-radius:8px;margin-top:1px}
+
 @media (prefers-reduced-motion:reduce){.sd-acc,.sd-ov,.sd-modal,.sd-shbtn .chev{transition:none!important}}
 @media (max-width:700px){
   .sd{padding:12px}
