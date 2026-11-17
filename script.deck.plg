@@ -1,7 +1,7 @@
 <?xml version='1.0' standalone='yes'?>
 <!DOCTYPE PLUGIN [
 <!ENTITY name    "script.deck">
-<!ENTITY version "2026.11.16">
+<!ENTITY version "2026.11.17">
 <!ENTITY plugdir "/usr/local/emhttp/plugins/script.deck">
 <!ENTITY cfgdir  "/boot/config/plugins/script.deck">
 <!ENTITY pluginURL "https://raw.githubusercontent.com/hernandito/script.deck/main/script.deck.plg">
@@ -327,7 +327,10 @@ textarea.sd-code{width:100%!important;height:440px;padding:12px!important;border
 .sd-catfoot .push{margin-left:auto;display:flex;gap:8px}
 
 /* Windows / Apple style emoji (per the footer checkbox) */
-.sd.emoji-system,.sd-ov.emoji-system{font-family:Inter,"Segoe UI","Segoe UI Emoji","Apple Color Emoji","Segoe UI Symbol",system-ui,-apple-system,sans-serif}
+/* Text fonts first: on iPad/Mac (no Inter/Segoe) "Apple Color Emoji" would otherwise become the
+   text font, and its wide digit and space glyphs stretch every number and gap. Emoji still fall
+   back to the emoji fonts glyph by glyph. */
+.sd.emoji-system,.sd-ov.emoji-system{font-family:Inter,"Segoe UI",-apple-system,BlinkMacSystemFont,system-ui,Roboto,"Segoe UI Emoji","Apple Color Emoji","Segoe UI Symbol",sans-serif}
 .emoji-system .sd-out{font-family:bitstream,"JetBrains Mono",ui-monospace,Menlo,Consolas,"Segoe UI Emoji","Apple Color Emoji",monospace}
 .emoji-system .sd-ico .emo,.emoji-system .sd-cell,.emoji-system .sd-emojis button,.emoji-system .sd-freq .e{font-family:"Segoe UI Emoji","Apple Color Emoji","Segoe UI Symbol",sans-serif}
 .sd-emojiopt{width:100%;padding:0 0 8px}

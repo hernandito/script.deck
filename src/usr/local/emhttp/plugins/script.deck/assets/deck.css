@@ -274,7 +274,10 @@ textarea.sd-code{width:100%!important;height:440px;padding:12px!important;border
 .sd-catfoot .push{margin-left:auto;display:flex;gap:8px}
 
 /* Windows / Apple style emoji (per the footer checkbox) */
-.sd.emoji-system,.sd-ov.emoji-system{font-family:Inter,"Segoe UI","Segoe UI Emoji","Apple Color Emoji","Segoe UI Symbol",system-ui,-apple-system,sans-serif}
+/* Text fonts first: on iPad/Mac (no Inter/Segoe) "Apple Color Emoji" would otherwise become the
+   text font, and its wide digit and space glyphs stretch every number and gap. Emoji still fall
+   back to the emoji fonts glyph by glyph. */
+.sd.emoji-system,.sd-ov.emoji-system{font-family:Inter,"Segoe UI",-apple-system,BlinkMacSystemFont,system-ui,Roboto,"Segoe UI Emoji","Apple Color Emoji","Segoe UI Symbol",sans-serif}
 .emoji-system .sd-out{font-family:bitstream,"JetBrains Mono",ui-monospace,Menlo,Consolas,"Segoe UI Emoji","Apple Color Emoji",monospace}
 .emoji-system .sd-ico .emo,.emoji-system .sd-cell,.emoji-system .sd-emojis button,.emoji-system .sd-freq .e{font-family:"Segoe UI Emoji","Apple Color Emoji","Segoe UI Symbol",sans-serif}
 .sd-emojiopt{width:100%;padding:0 0 8px}
