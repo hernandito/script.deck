@@ -227,6 +227,7 @@ switch ($a) {
     }
     if (isset($_POST['emoji'])) $ui['emoji'] = $_POST['emoji'] === 'system' ? 'system' : '';
     if (isset($_POST['fmt'])) $ui['fmt'] = in_array($_POST['fmt'], ['html', 'plain'], true) ? $_POST['fmt'] : '';
+    if (isset($_POST['badges'])) $ui['badges'] = $_POST['badges'] !== '0';   // counts on the category buttons
     if (isset($_POST['other'])) {                       // the "Other" category: its name and position
       $o = json_decode((string)$_POST['other'], true);
       if (is_array($o)) {

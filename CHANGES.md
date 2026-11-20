@@ -1,5 +1,6 @@
-- Fixed: scripts that print a lot (e.g. rsync backups) showed no runs; the whole log is now indexed, not just its end.
-- Pinned scripts get "Also show in its category" (on by default); unpinning always puts a script back in its category.
-- Categories sharing a prefix ("Backups - Daily", "Backups - Weekly") show as one heading with indented sub-sections.
-- Scripts with a question (#argumentDescription) ask it in the run window before starting; choices can be offered as [value:Label|value:Label].
-- First public release: tiles, live run window, run history, editing of titles, icons, schedules and scripts, category management.
+- Top bar: "Counts" toggle (fades the number badges on the category buttons) and "Collapse all" now sit left of the search box; the category settings gear sits right of "Classic page".
+- Categories nest up to 3 levels deep: name them "A - B - C" (e.g. "Backups - Daily - Appdata"); a category named exactly like a group shows its tiles under that heading.
+- iPad/Mac: fixed stretched spacing in titles and numbers when the Windows/Apple emoji style is on.
+- Wider tiles; small layout tweaks.
+- Fixed: scripts that print a lot (e.g. rsync backups) showed no runs; the whole log is now indexed.
+- Pinned scripts get "Also show in its category"; scripts with a question (#argumentDescription) ask it in the run window first.

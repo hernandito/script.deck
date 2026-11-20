@@ -86,7 +86,7 @@
 .sd-acc>div{min-height:0;overflow:hidden}
 /* Collapsed content is really hidden (no clicks, no Tab focus) once the closing animation ends. */
 .sd-sec.shut>.sd-acc{grid-template-rows:0fr;opacity:0;visibility:hidden;transition:grid-template-rows .3s ease,opacity .25s ease,visibility 0s .3s}
-.sd-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(172px,1fr));gap:10px;padding:2px 2px 4px;margin-left:40px}
+.sd-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(192px,1fr));gap:10px;padding:2px 2px 4px;margin-left:40px}
 .sd-empty{color:var(--muted);padding:20px 0}
 
 /* cards */
@@ -367,6 +367,21 @@ div.title:first-of-type{margin-bottom:8px;display:none}
 .sd-sec.sub{margin-left:40px;margin-bottom:4px}
 .sd-sec.sub .sd-catlabel{font-size:18px;font-weight:700;color:var(--ink2)}
 :is(.sd,.sd-ov) .sd-btn.sm{height:32px;padding:0 10px;font-size:12.5px;border-radius:8px;margin-top:1px}
+/* "Counts" toggle: fade the badges on the category buttons only (they keep their space,
+   so the buttons do not change size). Section-header badges are not affected. */
+.sd-cats .sd-cat .sd-badge{transition:opacity .2s ease}
+.sd-cats.nobadges .sd-cat .sd-badge{opacity:0}
+/* Manage-categories gear: right of "Classic page", same height (Unraid gives <button> its own
+   min-width and margins, so those are reset to match the <a> next to it). */
+:is(.sd,.sd-ov) .sd-btn.sd-gear{height:32px;min-width:0!important;margin:-10px 0 0!important;padding:0 10px!important;box-sizing:border-box;line-height:1;font-size:15px}
+/* "Counts" + "Collapse all": right-aligned in the top bar, just left of the search box */
+.sd-toptools{margin-left:auto;margin-top:-10px;display:flex;align-items:center;gap:14px}
+.sd-toptools + .sd-search{margin-left:6px}
+.sd-badgetoggle{font-size:12.5px;color:var(--muted);white-space:nowrap;cursor:pointer}
+.sd-badgetoggle input{margin:0 4px 0 0;vertical-align:-2px}
+/* outline level 3 ("A - B - C") and a group's own tiles */
+.sd-sec.sub .sd-sec.sub .sd-catlabel{font-size:16px;font-weight:600;color:var(--ink2)}
+.sd-sec.own{margin:0 0 6px;padding:0}
 
 @media (prefers-reduced-motion:reduce){.sd-acc,.sd-ov,.sd-modal,.sd-shbtn .chev{transition:none!important}}
 @media (max-width:700px){

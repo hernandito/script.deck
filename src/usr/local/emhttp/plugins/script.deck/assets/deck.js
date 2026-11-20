@@ -143,6 +143,7 @@
       S.other = { name: (o && o.name) || 'Other', pos: o && o.pos != null ? +o.pos : null };
       S.order = (d.ui && d.ui.order && !Array.isArray(d.ui.order)) ? d.ui.order : {};
       if (S.fmtPref === undefined) S.fmtPref = (d.ui && d.ui.fmt) || '';
+      if (S.badges === undefined) S.badges = !(d.ui && d.ui.badges === false);
       delete d.ui;
       S.data = d;
       if (!lastLayout || layoutSig() !== lastLayout) {
@@ -234,21 +235,39 @@
       return (s.plain + ' ' + s.desc + ' ' + s.id + ' ' + s.schedule.text).toLowerCase().indexOf(q) >= 0;
     });
   }
-  /* Categories that share a name before " - " (e.g. "Active Backup Tasks -
-     Daily / Weekly / Monthly") become one button with a section per category. */
+  /* Category names form an outline, up to 3 levels, split at " - ":
+       "Backups - Daily"            -> Backups > Daily
+       "Backups - Daily - Appdata"  -> Backups > Daily > Appdata
+       "Backups"                    -> scripts shown directly under the Backups heading
+     A level is only made when 2+ categories share it; otherwise the full name is kept.
+     Each node: { id, name, cats (every category in it), first, own (categories named
+     exactly this), kids (sub-nodes), leaf (the category, for a plain one) }. */
+  var MAX_DEPTH = 3;
   function groups() {
     var cats = (S.data.categories || []).filter(function (c) { return !c.parent; });
-    var prefix = function (n) { var i = n.indexOf(' - '); return i > 0 ? n.slice(0, i).trim() : ''; };
-    var count = {};
-    cats.forEach(function (c) { var p = prefix(c.name); if (p) count[p] = (count[p] || 0) + 1; });
-    var out = [], byKey = {};
-    cats.forEach(function (c) {
-      var p = prefix(c.name), shared = p && count[p] > 1;
-      var key = shared ? 'g:' + p : c.id;
-      if (!byKey[key]) { byKey[key] = { id: key, name: shared ? p : c.name, cats: [] }; out.push(byKey[key]); }
-      byKey[key].cats.push({ cat: c, short: shared ? c.name.slice(c.name.indexOf(' - ') + 3).trim() : c.name });
+    var ents = cats.map(function (c) {
+      return { cat: c, segs: c.name.split(' - ').map(function (x) { return x.trim(); }).filter(function (x) { return x; }) };
     });
-    return out;
+    function leaf(e, at) { return { id: e.cat.id, name: e.segs.slice(at).join(' - ') || e.cat.name, cats: [e.cat], first: e.cat, own: [], kids: [], leaf: e.cat }; }
+    function nest(list, at, depth) {
+      var order = [], by = {}, out = [];
+      list.forEach(function (e) {
+        var k = e.segs[at];
+        if (!by[k]) { by[k] = []; order.push(k); }
+        by[k].push(e);
+      });
+      order.forEach(function (k) {
+        var g = by[k];
+        if (g.length < 2 || depth >= MAX_DEPTH) { g.forEach(function (e) { out.push(leaf(e, at)); }); return; }
+        var own = g.filter(function (e) { return e.segs.length === at + 1; });
+        var rest = g.filter(function (e) { return e.segs.length > at + 1; });
+        out.push({ id: 'g:' + g[0].segs.slice(0, at + 1).join(' - '), name: k,
+          cats: g.map(function (e) { return e.cat; }), first: g[0].cat,
+          own: own.map(function (e) { return e.cat; }), kids: nest(rest, at + 1, depth + 1), leaf: null });
+      });
+      return out;
+    }
+    return nest(ents.filter(function (e) { return e.segs.length; }), 0, 1);
   }
   /* Category groups in display order, with "Other" (scripts without a category)
      placed where the user put it - by default last, like User Scripts Enhanced. */
@@ -256,7 +275,7 @@
     var top = (S.data.categories || []).filter(function (c) { return !c.parent; });
     var pos = S.other && S.other.pos != null ? S.other.pos : Infinity, out = [], placed = false;
     groups().forEach(function (g) {
-      var idx = top.indexOf(g.cats[0].cat);
+      var idx = top.indexOf(g.first);
       if (!placed && idx >= pos) { out.push({ other: true }); placed = true; }
       out.push({ g: g });
     });
@@ -287,15 +306,20 @@
     };
     var other = byOrder(list2.filter(function (s) { return !s.category || !cats.some(function (c) { return c.id === s.category; }); }), (S.order || {}).other);
     var G = groups();
-    // A group of categories sharing a prefix is one heading with its categories indented under it.
+    // A node of the outline becomes a section; a group is a heading with its own scripts
+    // (a category named exactly like it) and its sub-sections indented under it.
     var secOf = function (g) {
-      var subs = g.cats.map(function (x) { return { key: 'c' + x.cat.id, name: g.cats.length > 1 ? x.short : x.cat.name, items: inCat(x.cat.id) }; });
-      if (g.cats.length < 2) return subs;
+      if (g.leaf) return [{ key: 'c' + g.leaf.id, name: g.name, items: inCat(g.leaf.id) }];
+      var own = [];
+      g.own.forEach(function (c) { own = own.concat(inCat(c.id)); });
+      var subs = [];
+      g.kids.forEach(function (k) { subs = subs.concat(secOf(k)); });
       if (S.tab === 'all') subs = subs.filter(function (x) { return x.items.length; });
-      if (!subs.length) return [];
-      var all = [];
+      var all = own.slice();
       subs.forEach(function (x) { all = all.concat(x.items); });
-      return [{ key: g.id, name: g.name, group: true, subs: subs, items: all }];
+      if (!subs.length && !own.length && S.tab === 'all') return [];
+      return [{ key: g.id, name: g.name, group: true, subs: subs, items: all, own: own,
+                ownKey: g.own.length === 1 ? 'c' + g.own[0].id : null }];
     };
     var PIN = { key: 'pinned', name: '📌 Pinned', items: pinned };
     var OTHER = { key: 'other', name: otherName(), note: 'scripts without a category', items: other };
@@ -317,7 +341,7 @@
   /* Every section, group headings and their sub-sections alike, in page order. */
   function flatSecs(secs) {
     var out = [];
-    (secs || sections()).forEach(function (x) { out.push(x); if (x.subs) out = out.concat(x.subs); });
+    (secs || sections()).forEach(function (x) { out.push(x); if (x.subs) out = out.concat(flatSecs(x.subs)); });
     return out;
   }
 
@@ -328,7 +352,7 @@
     var otherN = S.data.scripts.filter(function (s) { return !s.category && inCategory(s); }).length;
     ordered().forEach(function (e) {
       if (e.other) { if (otherN) tabs.push({ id: 'other', name: otherName(), n: otherN }); return; }
-      var ids = e.g.cats.map(function (x) { return x.cat.id; });
+      var ids = e.g.cats.map(function (c) { return c.id; });
       tabs.push({ id: e.g.id, name: e.g.name, n: S.data.scripts.filter(function (s) { return ids.indexOf(s.category) >= 0 && inCategory(s); }).length });
     });
     if (!tabs.some(function (t) { return t.id === S.tab; })) S.tab = 'all';
@@ -352,43 +376,53 @@
     if (!S.data) return;
     var active = document.activeElement && document.activeElement.id === 'sd-q';
     var v = buildView(), secs = v.secs;
+    var anyOpen = flatSecs(secs).some(function (x) { return !S.shut[x.key]; });
     var h = '<div class="sd-top"><h1>Scripts</h1><span id="sd-chips" style="display:contents">' + chipsHtml() + '</span>';
+    // "Counts" and "Collapse all" sit just left of the search box
+    h += '<span class="sd-toptools">' +
+      '<label class="sd-chk sd-badgetoggle" title="Show or hide the script counts on the category buttons"><input type="checkbox" id="sd-badges"' + (S.badges === false ? '' : ' checked') + '> Counts</label>' +
+      '<button type="button" class="sd-linkbtn" data-allsec="' + (anyOpen ? 'shut' : 'open') + '">' + (anyOpen ? 'Collapse all' : 'Expand all') + '</button></span>';
     h += '<label class="sd-search">' + svg(I.search, 15) + '<input id="sd-q" type="search" placeholder="Find a script  ( / )" aria-label="Find a script" value="' + esc(S.q) + '"></label>';
-    h += '<a class="sd-btn" href="/Settings/Userscripts" title="The original User Scripts page">Classic page</a></div>';
+    h += '<a class="sd-btn" href="/Settings/Userscripts" title="The original User Scripts page">Classic page</a>';
+    h += '<button type="button" class="sd-btn sd-gear" data-managecats aria-label="Manage categories" title="Manage categories: add, rename, delete, reorder"><i class="fa fa-cog" aria-hidden="true"></i></button></div>';
 
     // Category buttons: all shown, wrapping onto more lines when needed.
-    h += '<nav class="sd-cats" aria-label="Categories">';
+    h += '<nav class="sd-cats' + (S.badges === false ? ' nobadges' : '') + '" aria-label="Categories">';
     v.tabs.forEach(function (t) {
       h += '<button type="button" class="sd-cat' + (S.tab === t.id ? ' on' : '') + '" data-tab="' + esc(t.id) + '" aria-pressed="' + (S.tab === t.id) + '" title="' + esc(t.name) + '">' +
         '<span class="nm">' + esc(t.name) + '</span><span class="sd-badge">' + t.n + '</span></button>';
     });
-    h += '<button type="button" class="sd-cat sq" data-managecats aria-label="Manage categories" title="Manage categories: add, rename, delete, reorder"><i class="fa fa-cog" aria-hidden="true"></i></button>';
-    var anyOpen = flatSecs(secs).some(function (x) { return !S.shut[x.key]; });
-    h += '<span class="grow"></span><button type="button" class="sd-linkbtn" data-allsec="' + (anyOpen ? 'shut' : 'open') + '">' + (anyOpen ? 'Collapse all' : 'Expand all') + '</button></nav>';
+    h += '</nav>';
 
     if (!secs.length || secs.every(function (x) { return !x.items.length; })) h += '<div class="sd-empty">' + (S.q ? 'No script matches “' + esc(S.q) + '”.' : 'Nothing here yet.') + '</div>';
     cardCache = {};
-    var secHtml = function (sec, sub) {
-      var arranging = S.reorder === sec.key;
+    var gridHtml = function (items, arranging) {
+      var o = '<div class="sd-grid">';
+      items.forEach(function (s) { var c = cardHtml(s, false, arranging); if (!arranging) cardCache[s.id] = c; o += c; });
+      return o + '</div>';
+    };
+    var secHtml = function (sec, sub, depth) {
+      // the tiles this heading arranges: its own (a plain category, or a group's own category)
+      var arrKey = sec.group ? sec.ownKey : sec.key, arrItems = sec.group ? (sec.own || []) : sec.items;
+      var arranging = !!arrKey && S.reorder === arrKey;
       var shut = !!S.shut[sec.key] && !S.q && !arranging;
-      var tools = sec.group ? '' : arranging
+      var tools = !arrKey ? '' : arranging
         ? '<span class="sd-arrbar"><span class="sd-help">Drag the tiles, or use ◀ ▶</span>' +
-          '<button type="button" class="sd-btn sm" data-arrcancel>Cancel</button><button type="button" class="sd-btn sm accent" data-arrdone="' + esc(sec.key) + '">Done</button></span>'
-        : (sec.items.length > 1 && !S.q && !S.reorder ? '<button type="button" class="sd-arrbtn" data-arrange="' + esc(sec.key) + '" aria-label="Arrange the tiles of ' + esc(sec.name) + '" title="Arrange tiles">' + svg(I.arrange, 15) + '</button>' : '');
-      var o = '<section class="sd-sec' + (sec.group ? ' grp' : '') + (sub ? ' sub' : '') + (shut ? ' shut' : '') + (arranging ? ' arranging' : '') + '" data-seckey="' + esc(sec.key) + '"><div class="sd-sh">' +
+          '<button type="button" class="sd-btn sm" data-arrcancel>Cancel</button><button type="button" class="sd-btn sm accent" data-arrdone="' + esc(arrKey) + '">Done</button></span>'
+        : (arrItems.length > 1 && !S.q && !S.reorder ? '<button type="button" class="sd-arrbtn" data-arrange="' + esc(arrKey) + '" aria-label="Arrange the tiles of ' + esc(sec.name) + '" title="Arrange tiles">' + svg(I.arrange, 15) + '</button>' : '');
+      var o = '<section class="sd-sec' + (sec.group ? ' grp' : '') + (sub ? ' sub lv' + depth : '') + (shut ? ' shut' : '') + (arranging && !sec.group ? ' arranging' : '') + '" data-seckey="' + esc(sec.key) + '"><div class="sd-sh">' +
         '<button type="button" class="sd-shbtn" data-sec="' + esc(sec.key) + '" aria-expanded="' + (!shut) + '"' + (arranging ? ' disabled' : '') + '><span class="chev">' + svg(I.chev, 14) + '</span>' +
         '<span class="sd-catlabel">' + esc(sec.name) + '</span><span class="sd-badge">' + sec.items.length + '</span></button>' +
         '<span class="note">' + esc(noteText(sec)) + '</span><span class="rule"></span>' + tools + '</div>' +
         '<div class="sd-acc"><div>';
-      if (sec.group) sec.subs.forEach(function (x) { o += secHtml(x, true); });
-      else {
-        o += '<div class="sd-grid">';
-        sec.items.forEach(function (s) { var c = cardHtml(s, false, arranging); if (!arranging) cardCache[s.id] = c; o += c; });
-        o += '</div>';
-      }
+      if (sec.group) {
+        // the group's own scripts first, in a headerless block that Arrange can find by its key
+        if (sec.own && sec.own.length) o += '<div class="sd-sec own' + (arranging ? ' arranging' : '') + '" data-seckey="' + esc(sec.ownKey || '') + '">' + gridHtml(sec.own, arranging) + '</div>';
+        sec.subs.forEach(function (x) { o += secHtml(x, true, depth + 1); });
+      } else o += gridHtml(sec.items, arranging);
       return o + '</div></div></section>';
     };
-    secs.forEach(function (sec) { h += secHtml(sec, false); });
+    secs.forEach(function (sec) { h += secHtml(sec, false, 1); });
     app.innerHTML = h;
     lastLayout = layoutSig();
     if (active) { var q = $('#sd-q'); q.focus(); q.setSelectionRange(q.value.length, q.value.length); }
@@ -426,7 +460,7 @@
     if (!shut) delete S.shut[key];
     var sec = app.querySelector('.sd-sec[data-seckey="' + cssq(key) + '"]');
     if (sec) { sec.classList.toggle('shut', !!shut); var b = sec.querySelector(':scope > .sd-sh .sd-shbtn'); if (b) b.setAttribute('aria-expanded', String(!shut)); }
-    var anyOpen = Array.prototype.some.call(app.querySelectorAll('.sd-sec'), function (x) { return !x.classList.contains('shut'); });
+    var anyOpen = Array.prototype.some.call(app.querySelectorAll('.sd-sec:not(.own)'), function (x) { return !x.classList.contains('shut'); });
     var lb = $('[data-allsec]', app);
     if (lb) { lb.dataset.allsec = anyOpen ? 'shut' : 'open'; lb.textContent = anyOpen ? 'Collapse all' : 'Expand all'; }
     saveShut();
@@ -1347,6 +1381,12 @@
   }
   function onChange(e) {
     var t = e.target, m = S.modal;
+    if (t.id === 'sd-badges') {                     // counts on the category buttons: fade, keep the layout
+      S.badges = t.checked;
+      var nav = $('.sd-cats', app); if (nav) nav.classList.toggle('nobadges', !S.badges);
+      post({ a: 'ui', badges: S.badges ? '1' : '0' }).catch(function () {});
+      return;
+    }
     if (t.id === 'sd-emoji-sys') {
       S.emoji = t.checked ? 'system' : '';
       save('emoji', S.emoji);
